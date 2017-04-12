@@ -17,7 +17,9 @@ import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;
 import android.media.MediaFormat;
+import android.media.MediaMuxer;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.support.annotation.NonNull;
@@ -31,8 +33,12 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.widget.Button;
 
+import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 /**
  * Created by joshua on 4/10/17.
@@ -43,18 +49,26 @@ public class MainActivity extends Activity {
     private final static String TAG = "VideoTest";
     private final static int PERM_REQUEST_CAMERA = 0;
 
+    private Button btnRecord;
     private TextureView textureView;
     private CameraDevice cameraDevice;
     private CaptureRequest.Builder captureRequestBuilder;
+    private CameraCaptureSession captureSession;
+    private ArrayList<ByteBuffer> bufferList = new ArrayList<>();
+    private ArrayList<MediaCodec.BufferInfo> bufferInfoList = new ArrayList<>();
+    private MediaFormat mediaFormat;
 
 
     private CameraCaptureSession.StateCallback captureSessionStateCallback = new CameraCaptureSession.StateCallback() {
 
         @Override
         public void onConfigured(@NonNull CameraCaptureSession session) {
-            HandlerThread thread = new HandlerThread("CameraPreview");
-            thread.start();
-            Handler backgroundHandler = new Handler(thread.getLooper());
+            captureSession = session;
+
+//            HandlerThread thread = new HandlerThread("CameraPreview");
+//            thread.start();
+//            Handler backgroundHandler = new Handler(thread.getLooper());
+            Handler backgroundHandler = new Handler();
 
             try {
                 session.setRepeatingRequest(captureRequestBuilder.build(), null, backgroundHandler);
@@ -66,6 +80,27 @@ public class MainActivity extends Activity {
         @Override
         public void onConfigureFailed(@NonNull CameraCaptureSession session) {
             Log.e(TAG, "captureSessionStateCallback.onConfigureFailed");
+        }
+
+        @Override
+        public void onClosed(@NonNull CameraCaptureSession session) {
+            Log.e(TAG, "CAMERA CLOSED");
+            try {
+                File filePath = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "test.mp4");
+                Log.d(TAG, filePath.getAbsolutePath());
+                MediaMuxer mediaMuxer = new MediaMuxer(filePath.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+                int trackIndex = mediaMuxer.addTrack(mediaFormat);
+                mediaMuxer.start();
+                for (int i = 0; i < bufferList.size(); i++) {
+                    ByteBuffer buffer = bufferList.get(i);
+                    MediaCodec.BufferInfo bufferInfo = bufferInfoList.get(i);
+                    mediaMuxer.writeSampleData(trackIndex, buffer, bufferInfo);
+                }
+                mediaMuxer.stop();
+                mediaMuxer.release();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
         }
     };
 
@@ -128,9 +163,13 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void toggleVideoRecord() {
+//        if (captureSession.)
+        startVideoRecord();
+    }
+
     private void startVideoRecord() {
 
-        Log.d(TAG, "startVideoRecord");
         if (null == cameraDevice) {
             Log.e(TAG, "cameraDevice is null, return");
             return;
@@ -150,15 +189,14 @@ public class MainActivity extends Activity {
         texture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
         Surface previewSurface = new Surface(texture);
 
-        MediaFormat mediaFormat = null;
-        mediaFormat = MediaFormat.createVideoFormat("video/avc", 640, 480);
-        mediaFormat.setInteger(MediaFormat.KEY_BIT_RATE, 6000000);
-        mediaFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
-        mediaFormat.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
-        mediaFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 5);
+        final MediaFormat format = MediaFormat.createVideoFormat("video/avc", 640, 480);
+        format.setInteger(MediaFormat.KEY_BIT_RATE, 6000000);
+        format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
+        format.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
+        format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 5);
 
         MediaCodecList codecList = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
-        String codecName = codecList.findEncoderForFormat(mediaFormat);
+        String codecName = codecList.findEncoderForFormat(format);
         MediaCodec mediaCodec = null;
         try {
             mediaCodec = MediaCodec.createByCodecName(codecName);
@@ -166,42 +204,60 @@ public class MainActivity extends Activity {
             e.printStackTrace();
         }
 
+        MediaCodecInfo mediaCodecInfo = mediaCodec.getCodecInfo();
+        String[] types = mediaCodecInfo.getSupportedTypes();
+        for (String type : types) {
+            Log.d(TAG, type);
+        }
+
         mediaCodec.setCallback(new MediaCodec.Callback() {
             @Override
             public void onInputBufferAvailable(@NonNull MediaCodec codec, int index) {
-                Log.e(TAG, "onInputBufferAvailable");
+//                Log.e(TAG, "onInputBufferAvailable");
             }
 
             @Override
             public void onOutputBufferAvailable(@NonNull MediaCodec codec, int index, @NonNull MediaCodec.BufferInfo info) {
-                Log.e(TAG, "onOutputBufferAvailable");
+
+                ByteBuffer outputBuffer = codec.getOutputBuffer(index);
+                bufferList.add(outputBuffer);
+                bufferInfoList.add(info);
+                Log.d(TAG, "Buffer size: "+String.valueOf(bufferList.size()));
+                if (bufferList.size() >= 100) {
+                    Log.d(TAG, "Over 100");
+                    captureSession.close();
+                }
+                codec.releaseOutputBuffer(index, false);
             }
 
             @Override
             public void onError(@NonNull MediaCodec codec, @NonNull MediaCodec.CodecException e) {
-                Log.e(TAG, "onError");
                 e.printStackTrace();
             }
 
             @Override
             public void onOutputFormatChanged(@NonNull MediaCodec codec, @NonNull MediaFormat format) {
-
+                Log.d(TAG, "output format changed");
+                mediaFormat = format;
             }
         });
 
-        mediaCodec.configure(mediaFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+        mediaCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
         Surface codecInputSurface = mediaCodec.createInputSurface();
         mediaCodec.start();
 
         try {
-            captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+            captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
             captureRequestBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
             captureRequestBuilder.addTarget(previewSurface);
+            captureRequestBuilder.addTarget(codecInputSurface);
             cameraDevice.createCaptureSession(Arrays.asList(previewSurface, codecInputSurface), captureSessionStateCallback, null);
 
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
+
+        btnRecord.setText("Stop");
 
     }
 
@@ -240,14 +296,13 @@ public class MainActivity extends Activity {
 
         });
 
-        Button btnRecord = (Button) findViewById(R.id.btnRecord);
+        btnRecord = (Button) findViewById(R.id.btnRecord);
         btnRecord.setOnClickListener(new View.OnClickListener() {
 
             @Override
             public void onClick(View v) {
-                startVideoRecord();
+                toggleVideoRecord();
             }
-
         });
 
     }
