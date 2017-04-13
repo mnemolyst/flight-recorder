@@ -57,6 +57,8 @@ public class MainActivity extends Activity {
     private ArrayList<ByteBuffer> bufferList = new ArrayList<>();
     private ArrayList<MediaCodec.BufferInfo> bufferInfoList = new ArrayList<>();
     private MediaFormat mediaFormat;
+    private MediaCodec mediaCodec;
+    private boolean videoPipelineActive = false;
 
 
     private CameraCaptureSession.StateCallback captureSessionStateCallback = new CameraCaptureSession.StateCallback() {
@@ -65,13 +67,12 @@ public class MainActivity extends Activity {
         public void onConfigured(@NonNull CameraCaptureSession session) {
             captureSession = session;
 
-//            HandlerThread thread = new HandlerThread("CameraPreview");
-//            thread.start();
-//            Handler backgroundHandler = new Handler(thread.getLooper());
-            Handler backgroundHandler = new Handler();
+            /*HandlerThread thread = new HandlerThread("CameraPreview");
+            thread.start();
+            Handler backgroundHandler = new Handler(thread.getLooper());*/
 
             try {
-                session.setRepeatingRequest(captureRequestBuilder.build(), null, backgroundHandler);
+                session.setRepeatingRequest(captureRequestBuilder.build(), null, null);
             } catch (CameraAccessException e) {
                 e.printStackTrace();
             }
@@ -85,22 +86,34 @@ public class MainActivity extends Activity {
         @Override
         public void onClosed(@NonNull CameraCaptureSession session) {
             Log.e(TAG, "CAMERA CLOSED");
+
+            File filePath = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "test.mp4");
+            Log.d(TAG, filePath.getAbsolutePath());
+            MediaMuxer mediaMuxer = null;
             try {
-                File filePath = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "test.mp4");
-                Log.d(TAG, filePath.getAbsolutePath());
-                MediaMuxer mediaMuxer = new MediaMuxer(filePath.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
-                int trackIndex = mediaMuxer.addTrack(mediaFormat);
-                mediaMuxer.start();
-                for (int i = 0; i < bufferList.size(); i++) {
-                    ByteBuffer buffer = bufferList.get(i);
-                    MediaCodec.BufferInfo bufferInfo = bufferInfoList.get(i);
-                    mediaMuxer.writeSampleData(trackIndex, buffer, bufferInfo);
-                }
-                mediaMuxer.stop();
-                mediaMuxer.release();
+                mediaMuxer = new MediaMuxer(filePath.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
             } catch (IOException e) {
                 e.printStackTrace();
             }
+            int trackIndex = mediaMuxer.addTrack(mediaFormat);
+
+            mediaMuxer.start();
+            for (int i = 0; i < bufferList.size(); i++) {
+                ByteBuffer buffer = bufferList.get(i);
+                MediaCodec.BufferInfo info = bufferInfoList.get(i);
+
+                buffer.position(info.offset);
+                buffer.limit(info.offset + info.size);
+
+                Log.d(TAG, "i:"+String.valueOf(i)+" offset:"+String.valueOf(info.offset)+" size:"+String.valueOf(info.size));
+
+                mediaMuxer.writeSampleData(trackIndex, buffer, info);
+            }
+            mediaMuxer.stop();
+            mediaMuxer.release();
+
+            mediaCodec.stop();
+            mediaCodec.release();
         }
     };
 
@@ -190,25 +203,24 @@ public class MainActivity extends Activity {
         Surface previewSurface = new Surface(texture);
 
         final MediaFormat format = MediaFormat.createVideoFormat("video/avc", 640, 480);
-        format.setInteger(MediaFormat.KEY_BIT_RATE, 6000000);
         format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
+        format.setInteger(MediaFormat.KEY_BIT_RATE, 1000000);
         format.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
-        format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 5);
+        format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
 
         MediaCodecList codecList = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
         String codecName = codecList.findEncoderForFormat(format);
-        MediaCodec mediaCodec = null;
         try {
             mediaCodec = MediaCodec.createByCodecName(codecName);
         } catch (IOException e) {
             e.printStackTrace();
         }
 
-        MediaCodecInfo mediaCodecInfo = mediaCodec.getCodecInfo();
+        /*MediaCodecInfo mediaCodecInfo = mediaCodec.getCodecInfo();
         String[] types = mediaCodecInfo.getSupportedTypes();
         for (String type : types) {
             Log.d(TAG, type);
-        }
+        }*/
 
         mediaCodec.setCallback(new MediaCodec.Callback() {
             @Override
@@ -220,12 +232,23 @@ public class MainActivity extends Activity {
             public void onOutputBufferAvailable(@NonNull MediaCodec codec, int index, @NonNull MediaCodec.BufferInfo info) {
 
                 ByteBuffer outputBuffer = codec.getOutputBuffer(index);
-                bufferList.add(outputBuffer);
+                ByteBuffer cloneBuffer = ByteBuffer.allocate(outputBuffer.capacity());
+                cloneBuffer.put(outputBuffer);
+                bufferList.add(cloneBuffer);
+
                 bufferInfoList.add(info);
-                Log.d(TAG, "Buffer size: "+String.valueOf(bufferList.size()));
-                if (bufferList.size() >= 100) {
+                Log.d(TAG, "Frames: "+String.valueOf(bufferList.size()));
+
+                if (bufferList.size() >= 100 && videoPipelineActive) {
                     Log.d(TAG, "Over 100");
+                    videoPipelineActive = false;
+                    try {
+                        captureSession.abortCaptures();
+                    } catch (CameraAccessException e) {
+                        e.printStackTrace();
+                    }
                     captureSession.close();
+                    codec.signalEndOfInputStream();
                 }
                 codec.releaseOutputBuffer(index, false);
             }
@@ -237,7 +260,6 @@ public class MainActivity extends Activity {
 
             @Override
             public void onOutputFormatChanged(@NonNull MediaCodec codec, @NonNull MediaFormat format) {
-                Log.d(TAG, "output format changed");
                 mediaFormat = format;
             }
         });
@@ -245,6 +267,7 @@ public class MainActivity extends Activity {
         mediaCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
         Surface codecInputSurface = mediaCodec.createInputSurface();
         mediaCodec.start();
+        videoPipelineActive = true;
 
         try {
             captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
