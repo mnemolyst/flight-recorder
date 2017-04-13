@@ -4,7 +4,10 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
+import android.graphics.Matrix;
 import android.graphics.SurfaceTexture;
+import android.hardware.SensorManager;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
@@ -20,8 +23,6 @@ import android.media.MediaFormat;
 import android.media.MediaMuxer;
 import android.os.Bundle;
 import android.os.Environment;
-import android.os.Handler;
-import android.os.HandlerThread;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.util.Log;
@@ -38,10 +39,15 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
 
 /**
  * Created by joshua on 4/10/17.
+ */
+
+/*
+    TODO
+    video stabilization
+    setOrientationHint
  */
 
 public class MainActivity extends Activity {
@@ -58,7 +64,7 @@ public class MainActivity extends Activity {
     private ArrayList<MediaCodec.BufferInfo> bufferInfoList = new ArrayList<>();
     private MediaFormat mediaFormat;
     private MediaCodec mediaCodec;
-    private boolean videoPipelineActive = false;
+    private boolean recordingVideo = false;
 
 
     private CameraCaptureSession.StateCallback captureSessionStateCallback = new CameraCaptureSession.StateCallback() {
@@ -85,7 +91,7 @@ public class MainActivity extends Activity {
 
         @Override
         public void onClosed(@NonNull CameraCaptureSession session) {
-            Log.e(TAG, "CAMERA CLOSED");
+            Log.d(TAG, "CAMERA CLOSED");
 
             File filePath = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "test.mp4");
             Log.d(TAG, filePath.getAbsolutePath());
@@ -138,7 +144,7 @@ public class MainActivity extends Activity {
 
                 @Override
                 public void onDisconnected(@NonNull CameraDevice camera) {
-                    Log.e(TAG, "cameraStateCallback.onDisconnected");
+                    Log.d(TAG, "cameraStateCallback.onDisconnected");
                 }
 
                 @Override
@@ -177,21 +183,24 @@ public class MainActivity extends Activity {
     }
 
     private void toggleVideoRecord() {
-//        if (captureSession.)
-        startVideoRecord();
+        if (! recordingVideo) {
+            startRecording();
+        } else {
+            stopRecording();
+        }
     }
 
-    private void startVideoRecord() {
+    private void startRecording() {
 
         if (null == cameraDevice) {
             Log.e(TAG, "cameraDevice is null, return");
             return;
         }
 
-        CameraManager manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+        CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
         CameraCharacteristics characteristics = null;
         try {
-            characteristics = manager.getCameraCharacteristics(cameraDevice.getId());
+            characteristics = cameraManager.getCameraCharacteristics(cameraDevice.getId());
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
@@ -224,9 +233,7 @@ public class MainActivity extends Activity {
 
         mediaCodec.setCallback(new MediaCodec.Callback() {
             @Override
-            public void onInputBufferAvailable(@NonNull MediaCodec codec, int index) {
-//                Log.e(TAG, "onInputBufferAvailable");
-            }
+            public void onInputBufferAvailable(@NonNull MediaCodec codec, int index) { }
 
             @Override
             public void onOutputBufferAvailable(@NonNull MediaCodec codec, int index, @NonNull MediaCodec.BufferInfo info) {
@@ -239,9 +246,9 @@ public class MainActivity extends Activity {
                 bufferInfoList.add(info);
                 Log.d(TAG, "Frames: "+String.valueOf(bufferList.size()));
 
-                if (bufferList.size() >= 100 && videoPipelineActive) {
+                if (bufferList.size() >= 100 && recordingVideo) {
                     Log.d(TAG, "Over 100");
-                    videoPipelineActive = false;
+                    recordingVideo = false;
                     try {
                         captureSession.abortCaptures();
                     } catch (CameraAccessException e) {
@@ -255,7 +262,7 @@ public class MainActivity extends Activity {
 
             @Override
             public void onError(@NonNull MediaCodec codec, @NonNull MediaCodec.CodecException e) {
-                e.printStackTrace();
+                Log.e(TAG, "MediaCodec.Callback.onError", e);
             }
 
             @Override
@@ -267,7 +274,7 @@ public class MainActivity extends Activity {
         mediaCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
         Surface codecInputSurface = mediaCodec.createInputSurface();
         mediaCodec.start();
-        videoPipelineActive = true;
+        recordingVideo = true;
 
         try {
             captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
@@ -280,8 +287,12 @@ public class MainActivity extends Activity {
             e.printStackTrace();
         }
 
-        btnRecord.setText("Stop");
+        btnRecord.setText(R.string.stop_button);
 
+    }
+
+    private void stopRecording() {
+        //
     }
 
     @Override
@@ -297,24 +308,32 @@ public class MainActivity extends Activity {
 
             @Override
             public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
-                Log.e(TAG, "surfaceTextureListener.onSurfaceTextureAvailable, width="+width+", height="+height);
+                Log.d(TAG, "surfaceTextureListener.onSurfaceTextureAvailable, width="+width+", height="+height);
+                SensorManager sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+                int orientation = getResources().getConfiguration().orientation;
+                if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
+                    Matrix transform = new Matrix();
+                    transform.setRotate(90, width / 2, height / 2);
+                    textureView.setTransform(transform);
+                }
+
                 openCamera();
             }
 
             @Override
             public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {
-                Log.e(TAG, "surfaceTextureListener.onSurfaceTextureSizeChanged, width="+width+", height="+height);
+                Log.d(TAG, "surfaceTextureListener.onSurfaceTextureSizeChanged, width="+width+", height="+height);
             }
 
             @Override
             public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
-                Log.e(TAG, "surfaceTextureListener.onSurfaceTextureDestroyed");
+                Log.d(TAG, "surfaceTextureListener.onSurfaceTextureDestroyed");
                 return true;
             }
 
             @Override
             public void onSurfaceTextureUpdated(SurfaceTexture surface) {
-//            Log.e(TAG, "surfaceTextureListener.onSurfaceTextureUpdated");
+//                Log.d(TAG, "surfaceTextureListener.onSurfaceTextureUpdated");
             }
 
         });
@@ -338,7 +357,7 @@ public class MainActivity extends Activity {
                 if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                     openCamera();
                 } else {
-                    Log.e(TAG, "Camera permission denied!");
+                    Log.d(TAG, "Camera permission denied!");
                 }
             }
         }
