@@ -93,30 +93,35 @@ public class MainActivity extends Activity {
         public void onClosed(@NonNull CameraCaptureSession session) {
             Log.d(TAG, "CAMERA CLOSED");
 
-            File filePath = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "test.mp4");
-            Log.d(TAG, filePath.getAbsolutePath());
-            MediaMuxer mediaMuxer = null;
-            try {
-                mediaMuxer = new MediaMuxer(filePath.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
-            } catch (IOException e) {
-                e.printStackTrace();
+            String state = Environment.getExternalStorageState();
+            if (Environment.MEDIA_MOUNTED.equals(state)) {
+
+                File savedFile = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "test.mp4");
+                String filePath = savedFile.getAbsolutePath();
+                Log.d(TAG, filePath);
+                MediaMuxer mediaMuxer = null;
+                try {
+                    mediaMuxer = new MediaMuxer(filePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+                int trackIndex = mediaMuxer.addTrack(mediaFormat);
+
+                mediaMuxer.start();
+                for (int i = 0; i < bufferList.size(); i++) {
+                    ByteBuffer buffer = bufferList.get(i);
+                    MediaCodec.BufferInfo info = bufferInfoList.get(i);
+
+                    buffer.position(info.offset);
+                    buffer.limit(info.offset + info.size);
+
+                    Log.d(TAG, "i:"+String.valueOf(i)+" offset:"+String.valueOf(info.offset)+" size:"+String.valueOf(info.size));
+
+                    mediaMuxer.writeSampleData(trackIndex, buffer, info);
+                }
+                mediaMuxer.stop();
+                mediaMuxer.release();
             }
-            int trackIndex = mediaMuxer.addTrack(mediaFormat);
-
-            mediaMuxer.start();
-            for (int i = 0; i < bufferList.size(); i++) {
-                ByteBuffer buffer = bufferList.get(i);
-                MediaCodec.BufferInfo info = bufferInfoList.get(i);
-
-                buffer.position(info.offset);
-                buffer.limit(info.offset + info.size);
-
-                Log.d(TAG, "i:"+String.valueOf(i)+" offset:"+String.valueOf(info.offset)+" size:"+String.valueOf(info.size));
-
-                mediaMuxer.writeSampleData(trackIndex, buffer, info);
-            }
-            mediaMuxer.stop();
-            mediaMuxer.release();
 
             mediaCodec.stop();
             mediaCodec.release();
