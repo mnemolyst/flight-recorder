@@ -131,7 +131,6 @@ public class MainActivity extends Activity {
                     e.printStackTrace();
                 }
                 int trackIndex = mediaMuxer.addTrack(mediaFormat);
-                Log.d(TAG, "FR: " + mediaFormat.getString(MediaFormat.KEY_FRAME_RATE));
 
                 mediaMuxer.start();
                 for (int i = 0; i < bufferList.size(); i++) {
@@ -154,6 +153,7 @@ public class MainActivity extends Activity {
 
                 bufferList = new ArrayList<>();
                 bufferInfoList = new ArrayList<>();
+                mediaFormat = null;
             } else {
                 Log.e(TAG, state);
             }
@@ -257,11 +257,11 @@ public class MainActivity extends Activity {
         texture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
         Surface previewSurface = new Surface(texture);
 
-        final MediaFormat format = MediaFormat.createVideoFormat("video/mp4v-es", 640, 480);
+        MediaFormat format = MediaFormat.createVideoFormat("video/mp4v-es", 640, 480);
         format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
         format.setInteger(MediaFormat.KEY_BIT_RATE, 5000000);
-        format.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
-        format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 3);
+        format.setString(MediaFormat.KEY_FRAME_RATE, null);
+        format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 5);
 
         MediaCodecList codecList = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
         String codecName = codecList.findEncoderForFormat(format);
@@ -304,7 +304,7 @@ public class MainActivity extends Activity {
                 if (bufferList.size() >= 120 && videoRecordState.equals(VideoRecordState.STARTED)) {
                     Log.d(TAG, "Stopping video record");
 
-                    mediaCodec.signalEndOfInputStream();
+                    codec.signalEndOfInputStream();
                     try {
                         captureSession.abortCaptures();
                     } catch (CameraAccessException e) {
@@ -324,9 +324,16 @@ public class MainActivity extends Activity {
             @Override
             public void onOutputFormatChanged(@NonNull MediaCodec codec, @NonNull MediaFormat format) {
 //                Log.d(TAG, "FR CHANGED: " + format.getInteger(MediaFormat.KEY_FRAME_RATE) + " " + format.getInteger(MediaFormat.KEY_BIT_RATE));
-                mediaFormat = format;
+                if (mediaFormat == null) {
+                    Log.d(TAG, "Format changed");
+                    mediaFormat = format;
+                } else {
+                    Log.d(TAG, "Format already changed");
+                }
             }
         });
+
+        format.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
 
         mediaCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
         Surface codecInputSurface = mediaCodec.createInputSurface();
