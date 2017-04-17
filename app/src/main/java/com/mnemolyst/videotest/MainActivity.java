@@ -78,8 +78,12 @@ public class MainActivity extends Activity {
         public void onConfigured(@NonNull CameraCaptureSession session) {
             captureSession = session;
 
+            HandlerThread thread = new HandlerThread("CameraPreview");
+            thread.start();
+            Handler backgroundHandler = new Handler(thread.getLooper());
+
             try {
-                session.setRepeatingRequest(captureRequestBuilder.build(), null, null);
+                session.setRepeatingRequest(captureRequestBuilder.build(), null, backgroundHandler);
             } catch (CameraAccessException e) {
                 e.printStackTrace();
             }
@@ -214,6 +218,8 @@ public class MainActivity extends Activity {
             Size previewSize = map.getOutputSizes(SurfaceTexture.class)[0];
 
             SurfaceTexture texture = textureView.getSurfaceTexture();
+            Log.d(TAG, textureView.toString());
+            Log.d(TAG, texture.toString());
             texture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
             Surface surface = new Surface(texture);
 
@@ -251,17 +257,24 @@ public class MainActivity extends Activity {
             e.printStackTrace();
         }
         StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-        Size previewSize = map.getOutputSizes(SurfaceTexture.class)[0];
+        Size[] previewOutputSizes = map.getOutputSizes(SurfaceTexture.class);
+        Size[] codecOutputSizes = map.getOutputSizes(MediaCodec.class);
+        Size previewSize = previewOutputSizes[0];
+        long mfd = map.getOutputMinFrameDuration(SurfaceTexture.class, previewOutputSizes[0]);
+        Log.d(TAG, "MIN FRAME DURATION: " + String.valueOf(mfd));
+        /*for (Size s : codecOutputSizes) {
+            Log.d(TAG, String.valueOf(s.getWidth()) + ", " + String.valueOf(s.getHeight()));
+        }*/
 
-        SurfaceTexture texture = textureView.getSurfaceTexture();
-        texture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
-        Surface previewSurface = new Surface(texture);
+        SurfaceTexture surfaceTexture = textureView.getSurfaceTexture();
+        surfaceTexture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
+        Surface previewSurface = new Surface(surfaceTexture);
 
-        MediaFormat format = MediaFormat.createVideoFormat("video/mp4v-es", 640, 480);
+        MediaFormat format = MediaFormat.createVideoFormat("video/avc", 640, 480);
         format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
         format.setInteger(MediaFormat.KEY_BIT_RATE, 5000000);
         format.setString(MediaFormat.KEY_FRAME_RATE, null);
-        format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 5);
+        format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
 
         MediaCodecList codecList = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
         String codecName = codecList.findEncoderForFormat(format);
@@ -359,27 +372,13 @@ public class MainActivity extends Activity {
         //
     }
 
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    private void initTextureView() {
 
-        super.onCreate(savedInstanceState);
-        requestWindowFeature(Window.FEATURE_NO_TITLE);
-        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        setContentView(R.layout.activity_main);
-
-        textureView = (TextureView) findViewById(R.id.texture);
         textureView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
 
             @Override
             public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
                 Log.d(TAG, "surfaceTextureListener.onSurfaceTextureAvailable, width="+width+", height="+height);
-                SensorManager sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
-                int orientation = getResources().getConfiguration().orientation;
-                if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
-                    Matrix transform = new Matrix();
-                    transform.setRotate(90, width / 2, height / 2);
-                    textureView.setTransform(transform);
-                }
 
                 openCamera();
             }
@@ -401,6 +400,18 @@ public class MainActivity extends Activity {
             }
 
         });
+    }
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+
+        super.onCreate(savedInstanceState);
+        requestWindowFeature(Window.FEATURE_NO_TITLE);
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        setContentView(R.layout.activity_main);
+
+        textureView = (TextureView) findViewById(R.id.texture);
+        initTextureView();
 
         btnRecord = (Button) findViewById(R.id.btnRecord);
         btnRecord.setOnClickListener(new View.OnClickListener() {
@@ -412,6 +423,23 @@ public class MainActivity extends Activity {
         });
 
         videoRecordState = VideoRecordState.STOPPED;
+    }
+
+    @Override
+    public void onRestart() {
+
+        super.onRestart();
+
+        if (! textureView.isAvailable()) {
+            SurfaceTexture texture = new SurfaceTexture(0);
+            textureView.setSurfaceTexture(texture);
+        }
+
+        initTextureView();
+
+//        Log.d(TAG, "onResume");
+//        Log.d(TAG, textureView.toString());
+        openCamera();
     }
 
     @Override
