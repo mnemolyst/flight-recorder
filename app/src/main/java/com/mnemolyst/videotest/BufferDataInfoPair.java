@@ -13,7 +13,7 @@ class BufferDataInfoPair {
     private ByteBuffer data;
     private MediaCodec.BufferInfo info;
 
-    public BufferDataInfoPair(ByteBuffer data, MediaCodec.BufferInfo info) {
+    BufferDataInfoPair(ByteBuffer data, MediaCodec.BufferInfo info) {
         this.data = data;
         this.info = info;
     }

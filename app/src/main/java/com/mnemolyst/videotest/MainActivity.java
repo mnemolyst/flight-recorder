@@ -5,6 +5,10 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.SurfaceTexture;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
@@ -38,6 +42,10 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+
+import static java.lang.Math.abs;
+import static java.lang.Math.sqrt;
 
 /**
  * Created by joshua on 4/10/17.
@@ -56,8 +64,11 @@ public class MainActivity extends Activity {
     private enum VideoRecordState {
         STOPPING, STOPPED, STARTING, STARTED
     }
-    private Button btnRecord;
+    private final static double G_THRESHOLD = SensorManager.GRAVITY_EARTH * sqrt(2) / 2;
+    private final static int X_AXIS = 0;
+    private final static int Y_AXIS = 1;
 
+    private Button btnRecord;
     private TextureView textureView;
     private CameraDevice cameraDevice;
     private CaptureRequest.Builder captureRequestBuilder;
@@ -67,6 +78,9 @@ public class MainActivity extends Activity {
     private MediaFormat mediaFormat;
     private MediaCodec mediaCodec;
     private VideoRecordState videoRecordState;
+    private int downAxis = X_AXIS;
+    private long timeAxisDown = 0;
+    private boolean orientationLocked = false;
 
 
     private CameraCaptureSession.StateCallback previewSessionCallback = new CameraCaptureSession.StateCallback() {
@@ -91,6 +105,7 @@ public class MainActivity extends Activity {
             Log.e(TAG, "previewSessionCallback.onConfigureFailed");
         }
     };
+
 
     private CameraCaptureSession.StateCallback recordSessionCallback = new CameraCaptureSession.StateCallback() {
 
@@ -167,9 +182,57 @@ public class MainActivity extends Activity {
 
             videoRecordState = VideoRecordState.STOPPED;
 
+            SensorManager sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+            sensorManager.unregisterListener(sensorEventListener);
+
             btnRecord.setText(R.string.start_button);
 
             startPreview();
+        }
+    };
+
+    private SensorEventListener sensorEventListener = new SensorEventListener() {
+
+        @Override
+        public void onSensorChanged(SensorEvent event) {
+            for (float i : event.values) {
+                Log.d(TAG, String.valueOf(i));
+            }
+            if (event.values[X_AXIS] > event.values[Y_AXIS] && event.values[X_AXIS] > event.values[2]) {
+                //
+            }
+            if (orientationLocked) {
+                if ((downAxis == X_AXIS && abs(event.values[X_AXIS]) < G_THRESHOLD)
+                        || (downAxis == Y_AXIS && abs(event.values[Y_AXIS]) < G_THRESHOLD)) {
+                    stopRecording();
+                    orientationLocked = false;
+                }
+            }
+
+            if (abs(event.values[X_AXIS]) > G_THRESHOLD) {
+                if (downAxis != X_AXIS) {
+                    timeAxisDown = event.timestamp;
+                } else if (event.timestamp - timeAxisDown >= (long)5e9) {
+                    orientationLocked = true;
+                }
+                downAxis = X_AXIS;
+                Log.d(TAG, "X down");
+            } else if (abs(event.values[Y_AXIS]) > G_THRESHOLD) {
+                if (downAxis != Y_AXIS) {
+                    timeAxisDown = event.timestamp;
+                } else if (event.timestamp - timeAxisDown >= (long)5e9) {
+                    orientationLocked = true;
+                }
+                downAxis = Y_AXIS;
+                Log.d(TAG, "Y down");
+            } else {
+                Log.d(TAG, "Z down");
+            }
+        }
+
+        @Override
+        public void onAccuracyChanged(Sensor sensor, int accuracy) {
+
         }
     };
 
@@ -234,6 +297,7 @@ public class MainActivity extends Activity {
     }
 
     private void toggleVideoRecord() {
+
         if (videoRecordState.equals(VideoRecordState.STOPPED)) {
             startRecording();
         } else {
@@ -353,6 +417,13 @@ public class MainActivity extends Activity {
         Surface codecInputSurface = mediaCodec.createInputSurface();
         mediaCodec.start();
 
+        SensorManager sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        List<Sensor> sensorList = sensorManager.getSensorList(Sensor.TYPE_GRAVITY);
+        if (sensorList.isEmpty()) {
+            sensorList = sensorManager.getSensorList(Sensor.TYPE_ACCELEROMETER);
+        }
+        sensorManager.registerListener(sensorEventListener, sensorList.get(0), 1_000_000);
+
         try {
             captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
             captureRequestBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
@@ -413,6 +484,7 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
 
         super.onCreate(savedInstanceState);
+
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         setContentView(R.layout.activity_main);
@@ -430,6 +502,29 @@ public class MainActivity extends Activity {
         });
 
         videoRecordState = VideoRecordState.STOPPED;
+    }
+
+    @Override
+    public void onPause() {
+        Log.d(TAG, "onPause");
+
+        try {
+            captureSession.abortCaptures();
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+        captureSession.close();
+
+        cameraDevice.close();
+
+        super.onPause();
+    }
+
+    @Override
+    public void onStop() {
+        Log.d(TAG, "onStop");
+
+        super.onStop();
     }
 
     @Override
