@@ -4,10 +4,7 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
 import android.content.pm.PackageManager;
-import android.content.res.Configuration;
-import android.graphics.Matrix;
 import android.graphics.SurfaceTexture;
-import android.hardware.SensorManager;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
@@ -59,14 +56,14 @@ public class MainActivity extends Activity {
     private enum VideoRecordState {
         STOPPING, STOPPED, STARTING, STARTED
     }
-
     private Button btnRecord;
+
     private TextureView textureView;
     private CameraDevice cameraDevice;
     private CaptureRequest.Builder captureRequestBuilder;
     private CameraCaptureSession captureSession;
-    private ArrayList<ByteBuffer> bufferList = new ArrayList<>();
-    private ArrayList<MediaCodec.BufferInfo> bufferInfoList = new ArrayList<>();
+    private int bufferLimit = 120;
+    private ArrayList<BufferDataInfoPair> bufferList = new ArrayList<>(bufferLimit);
     private MediaFormat mediaFormat;
     private MediaCodec mediaCodec;
     private VideoRecordState videoRecordState;
@@ -120,7 +117,7 @@ public class MainActivity extends Activity {
 
         @Override
         public void onClosed(@NonNull CameraCaptureSession session) {
-            Log.d(TAG, "Camera closed");
+            Log.d(TAG, "Capture session closed");
 
             String state = Environment.getExternalStorageState();
             if (Environment.MEDIA_MOUNTED.equals(state)) {
@@ -138,8 +135,9 @@ public class MainActivity extends Activity {
 
                 mediaMuxer.start();
                 for (int i = 0; i < bufferList.size(); i++) {
-                    ByteBuffer buffer = bufferList.get(i);
-                    MediaCodec.BufferInfo info = bufferInfoList.get(i);
+                    BufferDataInfoPair dataInfoPair = bufferList.get(i);
+                    ByteBuffer buffer = dataInfoPair.getData();
+                    MediaCodec.BufferInfo info = dataInfoPair.getInfo();
 
 //                    buffer.position(info.offset);
 //                    buffer.limit(info.offset + info.size);
@@ -148,19 +146,21 @@ public class MainActivity extends Activity {
                             " offset:" + String.valueOf(info.offset) +
                             " size:" + String.valueOf(info.size) +
                             " pt:" + String.valueOf(info.presentationTimeUs) +
-                            " keyframe:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME));
+                            " codec config:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) +
+                            " keyframe:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) +
+                            " EOS:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM));
 
                     mediaMuxer.writeSampleData(trackIndex, buffer, info);
                 }
                 mediaMuxer.stop();
                 mediaMuxer.release();
 
-                bufferList = new ArrayList<>();
-                bufferInfoList = new ArrayList<>();
-                mediaFormat = null;
             } else {
                 Log.e(TAG, state);
             }
+
+            bufferList = new ArrayList<>(bufferLimit);
+            mediaFormat = null;
 
             mediaCodec.stop();
             mediaCodec.release();
@@ -215,12 +215,11 @@ public class MainActivity extends Activity {
         try {
             CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraDevice.getId());
             StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-            Size previewSize = map.getOutputSizes(SurfaceTexture.class)[0];
+            Size[] previewOutputSizes = map.getOutputSizes(SurfaceTexture.class);
+            Size previewSize = previewOutputSizes[0];
 
             SurfaceTexture texture = textureView.getSurfaceTexture();
-            Log.d(TAG, textureView.toString());
-            Log.d(TAG, texture.toString());
-            texture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
+//            texture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
             Surface surface = new Surface(texture);
 
             captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
@@ -260,21 +259,30 @@ public class MainActivity extends Activity {
         Size[] previewOutputSizes = map.getOutputSizes(SurfaceTexture.class);
         Size[] codecOutputSizes = map.getOutputSizes(MediaCodec.class);
         Size previewSize = previewOutputSizes[0];
-        long mfd = map.getOutputMinFrameDuration(SurfaceTexture.class, previewOutputSizes[0]);
-        Log.d(TAG, "MIN FRAME DURATION: " + String.valueOf(mfd));
-        /*for (Size s : codecOutputSizes) {
+        for (Size s : codecOutputSizes) {
             Log.d(TAG, String.valueOf(s.getWidth()) + ", " + String.valueOf(s.getHeight()));
-        }*/
+        }
 
         SurfaceTexture surfaceTexture = textureView.getSurfaceTexture();
-        surfaceTexture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
+//        surfaceTexture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
         Surface previewSurface = new Surface(surfaceTexture);
 
-        MediaFormat format = MediaFormat.createVideoFormat("video/avc", 640, 480);
-        format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
-        format.setInteger(MediaFormat.KEY_BIT_RATE, 5000000);
-        format.setString(MediaFormat.KEY_FRAME_RATE, null);
-        format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
+        MediaFormat format = null;
+        for (Size s : codecOutputSizes) {
+            if (s.getHeight() == 720) {
+                format = MediaFormat.createVideoFormat("video/avc", s.getWidth(), s.getHeight());
+                format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
+                format.setInteger(MediaFormat.KEY_BIT_RATE, 5000000);
+                format.setString(MediaFormat.KEY_FRAME_RATE, null);
+                format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
+                break;
+            }
+        }
+
+        if (format == null) {
+            Log.e(TAG, "No suitable MediaFormat resolution found.");
+            return;
+        }
 
         MediaCodecList codecList = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
         String codecName = codecList.findEncoderForFormat(format);
@@ -284,48 +292,42 @@ public class MainActivity extends Activity {
             e.printStackTrace();
         }
 
-       /* for (MediaCodecInfo c : codecList.getCodecInfos()) {
-            Log.d(TAG, c.getName());
-            for (String t : c.getSupportedTypes()) {
-                Log.d(TAG, t);
-            }
-        }*/
-
-        /*MediaCodecInfo mediaCodecInfo = mediaCodec.getCodecInfo();
-        String[] types = mediaCodecInfo.getSupportedTypes();
-        for (String type : types) {
-            Log.d(TAG, type);
-        }*/
+        format.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
 
         mediaCodec.setCallback(new MediaCodec.Callback() {
+
             @Override
             public void onInputBufferAvailable(@NonNull MediaCodec codec, int index) { }
 
             @Override
             public void onOutputBufferAvailable(@NonNull MediaCodec codec, int index, @NonNull MediaCodec.BufferInfo info) {
 
+                if ((info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == MediaCodec.BUFFER_FLAG_CODEC_CONFIG) {
+                    return;
+                }
+
                 ByteBuffer outputBuffer = codec.getOutputBuffer(index);
                 ByteBuffer cloneBuffer = ByteBuffer.allocate(outputBuffer.capacity());
                 cloneBuffer.put(outputBuffer);
-                bufferList.add(cloneBuffer);
 
-                bufferInfoList.add(info);
+                if (bufferList.size() >= bufferLimit) {
+                    bufferList.subList(0, bufferList.size() - bufferLimit).clear();
+                }
+
+                BufferDataInfoPair dataInfoPair = new BufferDataInfoPair(cloneBuffer, info);
+                bufferList.add(dataInfoPair);
 
                 codec.releaseOutputBuffer(index, false);
-                Log.d(TAG, "Frames: "+String.valueOf(bufferList.size()));
 
-                if (bufferList.size() >= 120 && videoRecordState.equals(VideoRecordState.STARTED)) {
-                    Log.d(TAG, "Stopping video record");
 
-                    codec.signalEndOfInputStream();
+                if ((info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) == MediaCodec.BUFFER_FLAG_END_OF_STREAM) {
+
                     try {
                         captureSession.abortCaptures();
                     } catch (CameraAccessException e) {
                         e.printStackTrace();
                     }
                     captureSession.close();
-
-                    videoRecordState = VideoRecordState.STOPPING;
                 }
             }
 
@@ -341,12 +343,11 @@ public class MainActivity extends Activity {
                     Log.d(TAG, "Format changed");
                     mediaFormat = format;
                 } else {
-                    Log.d(TAG, "Format already changed");
+                    Log.e(TAG, "Format already changed");
                 }
             }
         });
 
-        format.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
 
         mediaCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
         Surface codecInputSurface = mediaCodec.createInputSurface();
@@ -369,7 +370,13 @@ public class MainActivity extends Activity {
     }
 
     private void stopRecording() {
-        //
+
+        if (videoRecordState.equals(VideoRecordState.STARTED)) {
+
+            mediaCodec.signalEndOfInputStream();
+
+            videoRecordState = VideoRecordState.STOPPING;
+        }
     }
 
     private void initTextureView() {
@@ -437,8 +444,6 @@ public class MainActivity extends Activity {
 
         initTextureView();
 
-//        Log.d(TAG, "onResume");
-//        Log.d(TAG, textureView.toString());
         openCamera();
     }
 
