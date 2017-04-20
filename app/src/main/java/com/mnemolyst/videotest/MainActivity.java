@@ -106,136 +106,6 @@ public class MainActivity extends Activity {
         }
     };
 
-
-    private CameraCaptureSession.StateCallback recordSessionCallback = new CameraCaptureSession.StateCallback() {
-
-        @Override
-        public void onConfigured(@NonNull CameraCaptureSession session) {
-            captureSession = session;
-
-            HandlerThread thread = new HandlerThread("CameraPreview");
-            thread.start();
-            Handler backgroundHandler = new Handler(thread.getLooper());
-
-            try {
-                session.setRepeatingRequest(captureRequestBuilder.build(), null, backgroundHandler);
-                videoRecordState = VideoRecordState.STARTED;
-            } catch (CameraAccessException e) {
-                e.printStackTrace();
-            }
-        }
-
-        @Override
-        public void onConfigureFailed(@NonNull CameraCaptureSession session) {
-            Log.e(TAG, "recordSessionCallback.onConfigureFailed");
-        }
-
-        @Override
-        public void onClosed(@NonNull CameraCaptureSession session) {
-            Log.d(TAG, "Capture session closed");
-
-            String state = Environment.getExternalStorageState();
-            if (Environment.MEDIA_MOUNTED.equals(state)) {
-
-                File savedFile = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "test.mp4");
-                String filePath = savedFile.getAbsolutePath();
-                Log.d(TAG, filePath);
-                MediaMuxer mediaMuxer = null;
-                try {
-                    mediaMuxer = new MediaMuxer(filePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-                int trackIndex = mediaMuxer.addTrack(mediaFormat);
-
-                mediaMuxer.start();
-                for (int i = 0; i < bufferList.size(); i++) {
-                    BufferDataInfoPair dataInfoPair = bufferList.get(i);
-                    ByteBuffer buffer = dataInfoPair.getData();
-                    MediaCodec.BufferInfo info = dataInfoPair.getInfo();
-
-//                    buffer.position(info.offset);
-//                    buffer.limit(info.offset + info.size);
-
-                    Log.d(TAG, "i:" + String.valueOf(i) +
-                            " offset:" + String.valueOf(info.offset) +
-                            " size:" + String.valueOf(info.size) +
-                            " pt:" + String.valueOf(info.presentationTimeUs) +
-                            " codec config:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) +
-                            " keyframe:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) +
-                            " EOS:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM));
-
-                    mediaMuxer.writeSampleData(trackIndex, buffer, info);
-                }
-                mediaMuxer.stop();
-                mediaMuxer.release();
-
-            } else {
-                Log.e(TAG, state);
-            }
-
-            bufferList = new ArrayList<>(bufferLimit);
-            mediaFormat = null;
-
-            mediaCodec.stop();
-            mediaCodec.release();
-
-            videoRecordState = VideoRecordState.STOPPED;
-
-            SensorManager sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
-            sensorManager.unregisterListener(sensorEventListener);
-
-            btnRecord.setText(R.string.start_button);
-
-            startPreview();
-        }
-    };
-
-    private SensorEventListener sensorEventListener = new SensorEventListener() {
-
-        @Override
-        public void onSensorChanged(SensorEvent event) {
-            for (float i : event.values) {
-                Log.d(TAG, String.valueOf(i));
-            }
-            if (event.values[X_AXIS] > event.values[Y_AXIS] && event.values[X_AXIS] > event.values[2]) {
-                //
-            }
-            if (orientationLocked) {
-                if ((downAxis == X_AXIS && abs(event.values[X_AXIS]) < G_THRESHOLD)
-                        || (downAxis == Y_AXIS && abs(event.values[Y_AXIS]) < G_THRESHOLD)) {
-                    stopRecording();
-                    orientationLocked = false;
-                }
-            }
-
-            if (abs(event.values[X_AXIS]) > G_THRESHOLD) {
-                if (downAxis != X_AXIS) {
-                    timeAxisDown = event.timestamp;
-                } else if (event.timestamp - timeAxisDown >= (long)5e9) {
-                    orientationLocked = true;
-                }
-                downAxis = X_AXIS;
-                Log.d(TAG, "X down");
-            } else if (abs(event.values[Y_AXIS]) > G_THRESHOLD) {
-                if (downAxis != Y_AXIS) {
-                    timeAxisDown = event.timestamp;
-                } else if (event.timestamp - timeAxisDown >= (long)5e9) {
-                    orientationLocked = true;
-                }
-                downAxis = Y_AXIS;
-                Log.d(TAG, "Y down");
-            } else {
-                Log.d(TAG, "Z down");
-            }
-        }
-
-        @Override
-        public void onAccuracyChanged(Sensor sensor, int accuracy) {
-
-        }
-    };
-
     private void openCamera() {
 
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
@@ -299,154 +169,14 @@ public class MainActivity extends Activity {
     private void toggleVideoRecord() {
 
         if (videoRecordState.equals(VideoRecordState.STOPPED)) {
-            startRecording();
+//            startRecording();
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, new String[] { Manifest.permission.CAMERA }, PERM_REQUEST_CAMERA);
+                return;
+            }
+            RecordService.startRecording(getApplicationContext(), "hi", "yo");
         } else {
-            stopRecording();
-        }
-    }
-
-    private void startRecording() {
-
-        if (null == cameraDevice) {
-            Log.e(TAG, "cameraDevice is null, return");
-            return;
-        }
-
-        CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
-        CameraCharacteristics characteristics = null;
-        try {
-            characteristics = cameraManager.getCameraCharacteristics(cameraDevice.getId());
-        } catch (CameraAccessException e) {
-            e.printStackTrace();
-        }
-        StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-        Size[] previewOutputSizes = map.getOutputSizes(SurfaceTexture.class);
-        Size[] codecOutputSizes = map.getOutputSizes(MediaCodec.class);
-        Size previewSize = previewOutputSizes[0];
-        for (Size s : codecOutputSizes) {
-            Log.d(TAG, String.valueOf(s.getWidth()) + ", " + String.valueOf(s.getHeight()));
-        }
-
-        SurfaceTexture surfaceTexture = textureView.getSurfaceTexture();
-//        surfaceTexture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
-        Surface previewSurface = new Surface(surfaceTexture);
-
-        MediaFormat format = null;
-        for (Size s : codecOutputSizes) {
-            if (s.getHeight() == 720) {
-                format = MediaFormat.createVideoFormat("video/avc", s.getWidth(), s.getHeight());
-                format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
-                format.setInteger(MediaFormat.KEY_BIT_RATE, 5000000);
-                format.setString(MediaFormat.KEY_FRAME_RATE, null);
-                format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
-                break;
-            }
-        }
-
-        if (format == null) {
-            Log.e(TAG, "No suitable MediaFormat resolution found.");
-            return;
-        }
-
-        MediaCodecList codecList = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
-        String codecName = codecList.findEncoderForFormat(format);
-        try {
-            mediaCodec = MediaCodec.createByCodecName(codecName);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-
-        format.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
-
-        mediaCodec.setCallback(new MediaCodec.Callback() {
-
-            @Override
-            public void onInputBufferAvailable(@NonNull MediaCodec codec, int index) { }
-
-            @Override
-            public void onOutputBufferAvailable(@NonNull MediaCodec codec, int index, @NonNull MediaCodec.BufferInfo info) {
-
-                if ((info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == MediaCodec.BUFFER_FLAG_CODEC_CONFIG) {
-                    return;
-                }
-
-                ByteBuffer outputBuffer = codec.getOutputBuffer(index);
-                ByteBuffer cloneBuffer = ByteBuffer.allocate(outputBuffer.capacity());
-                cloneBuffer.put(outputBuffer);
-
-                if (bufferList.size() >= bufferLimit) {
-                    bufferList.subList(0, bufferList.size() - bufferLimit).clear();
-                }
-
-                BufferDataInfoPair dataInfoPair = new BufferDataInfoPair(cloneBuffer, info);
-                bufferList.add(dataInfoPair);
-
-                codec.releaseOutputBuffer(index, false);
-
-
-                if ((info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) == MediaCodec.BUFFER_FLAG_END_OF_STREAM) {
-
-                    try {
-                        captureSession.abortCaptures();
-                    } catch (CameraAccessException e) {
-                        e.printStackTrace();
-                    }
-                    captureSession.close();
-                }
-            }
-
-            @Override
-            public void onError(@NonNull MediaCodec codec, @NonNull MediaCodec.CodecException e) {
-                Log.e(TAG, "MediaCodec.Callback.onError", e);
-            }
-
-            @Override
-            public void onOutputFormatChanged(@NonNull MediaCodec codec, @NonNull MediaFormat format) {
-//                Log.d(TAG, "FR CHANGED: " + format.getInteger(MediaFormat.KEY_FRAME_RATE) + " " + format.getInteger(MediaFormat.KEY_BIT_RATE));
-                if (mediaFormat == null) {
-                    Log.d(TAG, "Format changed");
-                    mediaFormat = format;
-                } else {
-                    Log.e(TAG, "Format already changed");
-                }
-            }
-        });
-
-
-        mediaCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
-        Surface codecInputSurface = mediaCodec.createInputSurface();
-        mediaCodec.start();
-
-        SensorManager sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
-        List<Sensor> sensorList = sensorManager.getSensorList(Sensor.TYPE_GRAVITY);
-        if (sensorList.isEmpty()) {
-            sensorList = sensorManager.getSensorList(Sensor.TYPE_ACCELEROMETER);
-        }
-        sensorManager.registerListener(sensorEventListener, sensorList.get(0), 1_000_000);
-
-        try {
-            captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
-            captureRequestBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
-            captureRequestBuilder.addTarget(previewSurface);
-            captureRequestBuilder.addTarget(codecInputSurface);
-            cameraDevice.createCaptureSession(Arrays.asList(previewSurface, codecInputSurface), recordSessionCallback, null);
-
-            videoRecordState = VideoRecordState.STARTING;
-
-        } catch (CameraAccessException e) {
-            e.printStackTrace();
-        }
-
-        btnRecord.setText(R.string.stop_button);
-    }
-
-    private void stopRecording() {
-
-        if (videoRecordState.equals(VideoRecordState.STARTED)) {
-
-            mediaCodec.signalEndOfInputStream();
-
-            videoRecordState = VideoRecordState.STOPPING;
+            //stopRecording();
         }
     }
 
@@ -458,7 +188,7 @@ public class MainActivity extends Activity {
             public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
                 Log.d(TAG, "surfaceTextureListener.onSurfaceTextureAvailable, width="+width+", height="+height);
 
-                openCamera();
+//                openCamera();
             }
 
             @Override
@@ -508,14 +238,14 @@ public class MainActivity extends Activity {
     public void onPause() {
         Log.d(TAG, "onPause");
 
-        try {
+       /* try {
             captureSession.abortCaptures();
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
         captureSession.close();
 
-        cameraDevice.close();
+        cameraDevice.close();*/
 
         super.onPause();
     }
@@ -532,14 +262,14 @@ public class MainActivity extends Activity {
 
         super.onRestart();
 
-        if (! textureView.isAvailable()) {
+        /*if (! textureView.isAvailable()) {
             SurfaceTexture texture = new SurfaceTexture(0);
             textureView.setSurfaceTexture(texture);
         }
 
-        initTextureView();
+        initTextureView();*/
 
-        openCamera();
+//        openCamera();
     }
 
     @Override
@@ -548,7 +278,8 @@ public class MainActivity extends Activity {
         switch (requestCode) {
             case PERM_REQUEST_CAMERA: {
                 if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                    openCamera();
+//                    openCamera();
+                    RecordService.startRecording(getApplicationContext(), "hi", "yo");
                 } else {
                     Log.d(TAG, "Camera permission denied!");
                 }

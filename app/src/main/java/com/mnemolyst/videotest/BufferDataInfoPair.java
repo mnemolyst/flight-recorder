@@ -10,20 +10,20 @@ import java.nio.ByteBuffer;
 
 class BufferDataInfoPair {
 
-    private ByteBuffer data;
+    private long dataId;
     private MediaCodec.BufferInfo info;
 
-    BufferDataInfoPair(ByteBuffer data, MediaCodec.BufferInfo info) {
-        this.data = data;
+    BufferDataInfoPair(long dataId, MediaCodec.BufferInfo info) {
+        this.dataId = dataId;
         this.info = info;
     }
 
-    public ByteBuffer getData() {
-        return data;
+    public long getDataId() {
+        return dataId;
     }
 
-    public void setData(ByteBuffer data) {
-        this.data = data;
+    public void setDataId(long dataId) {
+        this.dataId = dataId;
     }
 
     public MediaCodec.BufferInfo getInfo() {
