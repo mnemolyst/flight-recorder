@@ -3,9 +3,11 @@ package com.mnemolyst.videotest;
 import android.Manifest;
 import android.app.IntentService;
 import android.app.Service;
+import android.content.ComponentName;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.Context;
+import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
@@ -61,15 +63,9 @@ public class RecordService extends Service {
 
     private final static String TAG = "RecordService";
 
-    private static final String ACTION_RECORD = "com.mnemolyst.videotest.action.record";
-
-    // TODO: Rename parameters
-    private static final String EXTRA_PARAM1 = "com.mnemolyst.videotest.extra.PARAM1";
-    private static final String EXTRA_PARAM2 = "com.mnemolyst.videotest.extra.PARAM2";
-
     private int startId;
 
-    private enum VideoRecordState {
+    enum VideoRecordState {
         STOPPING, STOPPED, STARTING, STARTED
     }
     private VideoRecordState videoRecordState;
@@ -78,18 +74,25 @@ public class RecordService extends Service {
     private CameraCaptureSession captureSession;
     private MediaCodec mediaCodec;
     private MediaFormat mediaFormat;
-    private int bufferLimit = 30*30;
     private ArrayList<BufferDataInfoPair> bufferList = new ArrayList<>();
 
     private SQLiteOpenHelper sqLiteOpenHelper = null;
     private SQLiteDatabase db = null;
     private int sqlEncodedFramesId = 1;
+    private int maxFrames = 30*5;
 
     private RecordServiceBinder binder = new RecordServiceBinder();
 
-    private class RecordServiceBinder extends Binder {
+    private OnStopRecordCallback onStopRecordCallback = null;
 
-        public RecordService getService() {
+    static abstract class OnStopRecordCallback {
+
+        abstract void onStopRecord();
+    }
+
+    class RecordServiceBinder extends Binder {
+
+        RecordService getService() {
 
             return RecordService.this;
         }
@@ -102,6 +105,7 @@ public class RecordService extends Service {
         class EncodedFrameEntry implements BaseColumns {
             static final String TABLE_NAME = "encoded_frames";
             static final String FRAME_DATA_COLUMN_NAME = "frame_data";
+            static final String KEY_FRAME_COLUMN_NAME = "is_key_frame";
         }
     }
 
@@ -112,14 +116,17 @@ public class RecordService extends Service {
         private static final String SQL_CREATE_TABLES =
                 "CREATE TABLE " + EncodedFramesContract.EncodedFrameEntry.TABLE_NAME + " (" +
                         EncodedFramesContract.EncodedFrameEntry._ID + " INTEGER PRIMARY KEY, " +
-                        EncodedFramesContract.EncodedFrameEntry.FRAME_DATA_COLUMN_NAME + " BLOB)";
+                        EncodedFramesContract.EncodedFrameEntry.FRAME_DATA_COLUMN_NAME + " BLOB, " +
+                        EncodedFramesContract.EncodedFrameEntry.KEY_FRAME_COLUMN_NAME + " BOOLEAN)";
 
         EncodedFramesHelper(Context context) {
+
             super(context, DATABASE_NAME, null, DATABASE_VERSION);
         }
 
         @Override
         public void onCreate(SQLiteDatabase db) {
+
             db.execSQL(SQL_CREATE_TABLES);
         }
 
@@ -128,32 +135,8 @@ public class RecordService extends Service {
 
         }
     }
-    /**
-     * Starts this service to perform action Foo with the given parameters. If
-     * the service is already performing a task this action will be queued.
-     *
-     * @see IntentService
-     */
-    // TODO: Customize helper method
-    public static void startRecording(Context context, String param1, String param2) {
-        Intent intent = new Intent(context, RecordService.class);
-        intent.setAction(ACTION_RECORD);
-        intent.putExtra(EXTRA_PARAM1, param1);
-        intent.putExtra(EXTRA_PARAM2, param2);
-        context.startService(intent);
-    }
 
-    @Override
-    public void onCreate() {
-
-        sqLiteOpenHelper = new EncodedFramesHelper(this);
-        db = sqLiteOpenHelper.getWritableDatabase();
-    }
-
-    @Override
-    public int onStartCommand(final Intent intent, int flags, int startId) {
-
-        this.startId = startId;
+    void startRecording() {
 
         new Thread(new Runnable() {
 
@@ -162,25 +145,37 @@ public class RecordService extends Service {
                 doStartRecord();
             }
         }).run();
+    }
 
-        return START_NOT_STICKY;
+    @Override
+    public void onCreate() {
+
+        videoRecordState = VideoRecordState.STOPPED;
+        sqLiteOpenHelper = new EncodedFramesHelper(this);
+        db = sqLiteOpenHelper.getWritableDatabase();
     }
 
     @Override
     public IBinder onBind(Intent intent) {
+
         return binder;
     }
 
     @Override
-    public void onDestroy() {
-        db.close();
-        Log.d(TAG, "Destroyed");
+    public boolean onUnbind(Intent intent) {
+
+        stopRecording();
+        return false;
+    }
+
+    public void registerOnStopRecordCallback(OnStopRecordCallback callback) {
+
+        onStopRecordCallback = callback;
     }
 
     private void doStartRecord() {
 
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            stopSelf();
             return;
         }
 
@@ -259,7 +254,7 @@ public class RecordService extends Service {
 
         format.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
 
-        db.execSQL("DELETE FROM " + EncodedFramesContract.EncodedFrameEntry.TABLE_NAME);
+        db.delete(EncodedFramesContract.EncodedFrameEntry.TABLE_NAME, null, null);
         sqlEncodedFramesId = 1;
 
         mediaCodec.setCallback(mediaCodecCallback);
@@ -290,10 +285,6 @@ public class RecordService extends Service {
 
     private MediaCodec.Callback mediaCodecCallback = new MediaCodec.Callback() {
 
-        private String insertSql = "INSERT INTO " + EncodedFramesContract.EncodedFrameEntry.TABLE_NAME + "(" +
-                EncodedFramesContract.EncodedFrameEntry._ID + "," +
-                EncodedFramesContract.EncodedFrameEntry.FRAME_DATA_COLUMN_NAME + ") VALUES (?,?)";
-
         @Override
         public void onInputBufferAvailable(@NonNull MediaCodec codec, int index) { }
 
@@ -319,9 +310,24 @@ public class RecordService extends Service {
 
 //            Log.d(TAG, "Frames: " + String.valueOf(bufferList.size()));
 
-            if (bufferList.size() > 30*10) {
-                stopRecording();
+            if (bufferList.size() > maxFrames) {
+
+                int minFrameIdx = bufferList.size() - maxFrames;
+
+                long minFrameId = bufferList.get(minFrameIdx).getDataId();
+                db.delete(
+                        EncodedFramesContract.EncodedFrameEntry.TABLE_NAME,
+                        EncodedFramesContract.EncodedFrameEntry._ID + " < ?",
+                        new String[] { String.valueOf(minFrameId) }
+                );
+
+                bufferList.subList(0, minFrameIdx).clear();
             }
+
+            Cursor cursor = db.rawQuery("SELECT COUNT(*) FROM encoded_frames", null, null);
+            cursor.moveToFirst();
+            Log.d(TAG, cursor.getString(0) + " rows");
+            cursor.close();
 
             codec.releaseOutputBuffer(index, false);
 
@@ -386,11 +392,6 @@ public class RecordService extends Service {
                 File savedFile = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "test.mp4");
                 String filePath = savedFile.getAbsolutePath();
 
-                String[] tableRows = {
-                        EncodedFramesContract.EncodedFrameEntry.FRAME_DATA_COLUMN_NAME,
-                };
-
-
                 MediaMuxer mediaMuxer = null;
                 try {
                     mediaMuxer = new MediaMuxer(filePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
@@ -402,7 +403,6 @@ public class RecordService extends Service {
                 mediaMuxer.start();
 
                 for (BufferDataInfoPair dataInfoPair : bufferList) {
-//                while (cursor.moveToNext()) {
 
                     long bufferId = dataInfoPair.getDataId();
                     MediaCodec.BufferInfo info = dataInfoPair.getInfo();
@@ -433,11 +433,13 @@ public class RecordService extends Service {
 
                     mediaMuxer.writeSampleData(trackIndex, buffer, info);
                 }
+
                 mediaMuxer.stop();
                 mediaMuxer.release();
 
+                db.delete(EncodedFramesContract.EncodedFrameEntry.TABLE_NAME, null, null);
             } else {
-                Log.e(TAG, state);
+                Log.e(TAG, "External media unavailable: " + state);
             }
 
             bufferList = new ArrayList<>();
@@ -451,7 +453,9 @@ public class RecordService extends Service {
             SensorManager sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
             sensorManager.unregisterListener(sensorEventListener);
 
-            stopSelf(startId);
+            if (onStopRecordCallback != null) {
+                onStopRecordCallback.onStopRecord();
+            }
         }
     };
 
@@ -504,6 +508,17 @@ public class RecordService extends Service {
 
         }
     };
+
+    @Override
+    public void onDestroy() {
+
+        db.close();
+        Log.d(TAG, "Destroyed");
+    }
+
+    VideoRecordState getVideoRecordState() {
+        return videoRecordState;
+    }
 
     void stopRecording() {
 

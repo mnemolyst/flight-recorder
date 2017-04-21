@@ -2,7 +2,10 @@ package com.mnemolyst.videotest;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
+import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.graphics.SurfaceTexture;
 import android.hardware.Sensor;
@@ -26,6 +29,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.os.IBinder;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.util.Log;
@@ -61,9 +65,6 @@ public class MainActivity extends Activity {
 
     private final static String TAG = "VideoTest";
     private final static int PERM_REQUEST_CAMERA = 0;
-    private enum VideoRecordState {
-        STOPPING, STOPPED, STARTING, STARTED
-    }
     private final static double G_THRESHOLD = SensorManager.GRAVITY_EARTH * sqrt(2) / 2;
     private final static int X_AXIS = 0;
     private final static int Y_AXIS = 1;
@@ -77,11 +78,26 @@ public class MainActivity extends Activity {
     private ArrayList<BufferDataInfoPair> bufferList = new ArrayList<>(bufferLimit);
     private MediaFormat mediaFormat;
     private MediaCodec mediaCodec;
-    private VideoRecordState videoRecordState;
     private int downAxis = X_AXIS;
     private long timeAxisDown = 0;
     private boolean orientationLocked = false;
+    private RecordService recordService = null;
 
+    private ServiceConnection serviceConnection = new ServiceConnection() {
+
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder service) {
+
+            RecordService.RecordServiceBinder binder = (RecordService.RecordServiceBinder) service;
+            recordService = binder.getService();
+            recordService.registerOnStopRecordCallback(onStopRecordCallback);
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+            recordService = null;
+        }
+    };
 
     private CameraCaptureSession.StateCallback previewSessionCallback = new CameraCaptureSession.StateCallback() {
 
@@ -103,6 +119,12 @@ public class MainActivity extends Activity {
         @Override
         public void onConfigureFailed(@NonNull CameraCaptureSession session) {
             Log.e(TAG, "previewSessionCallback.onConfigureFailed");
+        }
+    };
+
+    private RecordService.OnStopRecordCallback onStopRecordCallback = new RecordService.OnStopRecordCallback() {
+        void onStopRecord() {
+            btnRecord.setText(R.string.start_button);
         }
     };
 
@@ -168,15 +190,15 @@ public class MainActivity extends Activity {
 
     private void toggleVideoRecord() {
 
-        if (videoRecordState.equals(VideoRecordState.STOPPED)) {
-//            startRecording();
+        if (recordService.getVideoRecordState().equals(RecordService.VideoRecordState.STOPPED)) {
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this, new String[] { Manifest.permission.CAMERA }, PERM_REQUEST_CAMERA);
                 return;
             }
-            RecordService.startRecording(getApplicationContext(), "hi", "yo");
+            recordService.startRecording();
+            btnRecord.setText(R.string.stop_button);
         } else {
-            //stopRecording();
+            recordService.stopRecording();
         }
     }
 
@@ -231,7 +253,8 @@ public class MainActivity extends Activity {
             }
         });
 
-        videoRecordState = VideoRecordState.STOPPED;
+        Intent intent = new Intent(this, RecordService.class);
+        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
     }
 
     @Override
@@ -279,7 +302,7 @@ public class MainActivity extends Activity {
             case PERM_REQUEST_CAMERA: {
                 if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
 //                    openCamera();
-                    RecordService.startRecording(getApplicationContext(), "hi", "yo");
+                    recordService.startRecording();
                 } else {
                     Log.d(TAG, "Camera permission denied!");
                 }
