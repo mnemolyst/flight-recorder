@@ -2,6 +2,9 @@ package com.mnemolyst.videotest;
 
 import android.Manifest;
 import android.app.IntentService;
+import android.app.Notification;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.ComponentName;
 import android.content.ContentValues;
@@ -34,6 +37,7 @@ import android.os.Binder;
 import android.os.Environment;
 import android.os.IBinder;
 import android.provider.BaseColumns;
+import android.service.notification.StatusBarNotification;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.util.Log;
@@ -62,6 +66,7 @@ import static java.lang.Math.sqrt;
 public class RecordService extends Service {
 
     private final static String TAG = "RecordService";
+    private final static int ONGOING_NOTIFICATION_ID = 1;
 
     private int startId;
 
@@ -281,6 +286,20 @@ public class RecordService extends Service {
             sensorList = sensorManager.getSensorList(Sensor.TYPE_ACCELEROMETER);
         }
         sensorManager.registerListener(sensorEventListener, sensorList.get(0), 1_000_000);
+
+        Intent notificationIntent = new Intent(this, MainActivity.class);
+        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, 0);
+
+        Notification notification = new Notification.Builder(this)
+                .setContentTitle(getText(R.string.notification_title))
+                .setContentText(getText(R.string.notification_message))
+                .setSmallIcon(R.drawable.recording_notification_icon)
+                .setContentIntent(pendingIntent)
+                .build();
+
+        NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+//        notificationManager.notify(1, notification);
+        startForeground(ONGOING_NOTIFICATION_ID, notification);
     }
 
     private MediaCodec.Callback mediaCodecCallback = new MediaCodec.Callback() {
@@ -452,6 +471,8 @@ public class RecordService extends Service {
 
             SensorManager sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
             sensorManager.unregisterListener(sensorEventListener);
+
+            stopForeground(true);
 
             if (onStopRecordCallback != null) {
                 onStopRecordCallback.onStopRecord();

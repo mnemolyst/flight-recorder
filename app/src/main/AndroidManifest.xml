@@ -2,10 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.mnemolyst.videotest">
 
-    <uses-sdk
-        android:minSdkVersion="21"
-        android:targetSdkVersion="21" />
-
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
 
@@ -35,7 +31,8 @@
 
         <service
             android:name=".RecordService"
-            android:exported="false"></service>
+            android:exported="false" />
+
     </application>
 
 </manifest>
