@@ -13,8 +13,6 @@ import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.util.Log;
 import android.view.View;
-import android.view.Window;
-import android.view.WindowManager;
 import android.widget.Button;
 
 /**
@@ -30,7 +28,7 @@ import android.widget.Button;
 public class MainActivity extends Activity {
 
     private final static String TAG = "VideoTest";
-    private final static int PERM_REQUEST_CAMERA = 0;
+    private final static int PERM_REQUEST_CAMERA_STORAGE = 1;
 
     private Button btnRecord;
     private RecordService recordService = null;
@@ -47,12 +45,15 @@ public class MainActivity extends Activity {
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
+
             recordService = null;
         }
     };
 
     private RecordService.OnStopRecordCallback onStopRecordCallback = new RecordService.OnStopRecordCallback() {
+
         void onStopRecord() {
+
             btnRecord.setText(R.string.start_button);
         }
     };
@@ -60,13 +61,24 @@ public class MainActivity extends Activity {
     private void toggleVideoRecord() {
 
         if (recordService.getVideoRecordState().equals(RecordService.VideoRecordState.STOPPED)) {
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(this, new String[] { Manifest.permission.CAMERA }, PERM_REQUEST_CAMERA);
+
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED
+                    || ActivityCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
+                    || ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+
+                ActivityCompat.requestPermissions(this, new String[] {
+                        Manifest.permission.CAMERA,
+                        Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                        Manifest.permission.RECORD_AUDIO
+                }, PERM_REQUEST_CAMERA_STORAGE);
+
                 return;
             }
+
             recordService.startRecording();
             btnRecord.setText(R.string.stop_button);
         } else {
+
             recordService.stopRecording();
         }
     }
@@ -110,6 +122,7 @@ public class MainActivity extends Activity {
         super.onResume();
 
         if (recordService != null && recordService.getVideoRecordState().equals(RecordService.VideoRecordState.STARTED)) {
+
             btnRecord.setText(R.string.stop_button);
         }
     }
@@ -124,10 +137,14 @@ public class MainActivity extends Activity {
     public void onRequestPermissionsResult(int requestCode, @NonNull String permissions[], @NonNull int[] grantResults) {
 
         switch (requestCode) {
-            case PERM_REQUEST_CAMERA: {
+
+            case PERM_REQUEST_CAMERA_STORAGE: {
+
                 if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+
                     recordService.startRecording();
                 } else {
+
                     Log.d(TAG, "Camera permission denied!");
                 }
             }

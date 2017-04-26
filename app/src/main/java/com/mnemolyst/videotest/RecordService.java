@@ -3,19 +3,15 @@ package com.mnemolyst.videotest;
 import android.Manifest;
 import android.app.IntentService;
 import android.app.Notification;
-import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
-import android.content.ComponentName;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.Context;
-import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
-import android.database.sqlite.SQLiteStatement;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -28,29 +24,26 @@ import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CameraMetadata;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
+import android.media.AudioFormat;
+import android.media.AudioRecord;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;
 import android.media.MediaFormat;
 import android.media.MediaMuxer;
+import android.media.MediaRecorder;
 import android.os.Binder;
 import android.os.Environment;
 import android.os.IBinder;
 import android.provider.BaseColumns;
-import android.service.notification.StatusBarNotification;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.util.Log;
 import android.util.Size;
 import android.view.Surface;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
-import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -68,7 +61,7 @@ public class RecordService extends Service {
     private final static String TAG = "RecordService";
     private final static int ONGOING_NOTIFICATION_ID = 1;
 
-    private int startId;
+    private final Object lockObj = new Object();
 
     enum VideoRecordState {
         STOPPING, STOPPED, STARTING, STARTED
@@ -77,14 +70,32 @@ public class RecordService extends Service {
     private CameraDevice cameraDevice;
     private CaptureRequest.Builder captureRequestBuilder;
     private CameraCaptureSession captureSession;
-    private MediaCodec mediaCodec;
-    private MediaFormat mediaFormat;
+    private MediaCodec videoCodec;
+    private Surface videoInputSurface;
+    private MediaCodec audioCodec;
+    private MediaFormat videoFormat;
+    private MediaFormat audioFormat;
     private ArrayList<BufferDataInfoPair> bufferList = new ArrayList<>();
+    private long lastPresentationTime = 0;
+
+    private AudioRecord audioRecord;
+    private int audioSampleRate = 48000;
+    private int audioFrameBytes = audioSampleRate * 2 / 30;
+    private ByteBuffer audioBufferAcc;
 
     private SQLiteOpenHelper sqLiteOpenHelper = null;
     private SQLiteDatabase db = null;
     private int sqlEncodedFramesId = 1;
     private int maxFrames = 30*5;
+    private Integer sensorOrientation = 0;
+
+    // Gravity sensor event listener variables
+    private final double G_THRESHOLD = SensorManager.GRAVITY_EARTH * sqrt(2) / 2;
+    private final int X_AXIS = 0;
+    private final int Y_AXIS = 1;
+    private int downAxis = -1;
+    private long timeAxisDown = 0;
+    private boolean orientationLocked = false;
 
     private RecordServiceBinder binder = new RecordServiceBinder();
 
@@ -110,7 +121,6 @@ public class RecordService extends Service {
         class EncodedFrameEntry implements BaseColumns {
             static final String TABLE_NAME = "encoded_frames";
             static final String FRAME_DATA_COLUMN_NAME = "frame_data";
-            static final String KEY_FRAME_COLUMN_NAME = "is_key_frame";
         }
     }
 
@@ -121,8 +131,7 @@ public class RecordService extends Service {
         private static final String SQL_CREATE_TABLES =
                 "CREATE TABLE " + EncodedFramesContract.EncodedFrameEntry.TABLE_NAME + " (" +
                         EncodedFramesContract.EncodedFrameEntry._ID + " INTEGER PRIMARY KEY, " +
-                        EncodedFramesContract.EncodedFrameEntry.FRAME_DATA_COLUMN_NAME + " BLOB, " +
-                        EncodedFramesContract.EncodedFrameEntry.KEY_FRAME_COLUMN_NAME + " BOOLEAN)";
+                        EncodedFramesContract.EncodedFrameEntry.FRAME_DATA_COLUMN_NAME + " BLOB)";
 
         EncodedFramesHelper(Context context) {
 
@@ -192,8 +201,9 @@ public class RecordService extends Service {
 
                 @Override
                 public void onOpened(@NonNull CameraDevice camera) {
+
                     cameraDevice = camera;
-                    onCameraOpened();
+                    prepareForRecording();
                 }
 
                 @Override
@@ -212,10 +222,25 @@ public class RecordService extends Service {
         }
     }
 
-    private void onCameraOpened() {
+    private void prepareForRecording() {
+
+        db.delete(EncodedFramesContract.EncodedFrameEntry.TABLE_NAME, null, null);
+        sqlEncodedFramesId = 1;
+
+        try {
+            prepareVideoCodec();
+            prepareAudioCodec();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        startGravitySensor();
+        notifyForeground();
+    }
+
+    private void prepareVideoCodec() throws IOException {
 
         if (null == cameraDevice) {
-            Log.e(TAG, "cameraDevice is null, return");
+            Log.e(TAG, "cameraDevice is null");
             return;
         }
 
@@ -231,6 +256,8 @@ public class RecordService extends Service {
         for (Size s : codecOutputSizes) {
             Log.d(TAG, String.valueOf(s.getWidth()) + ", " + String.valueOf(s.getHeight()));
         }
+        sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
+        Log.d(TAG, String.valueOf(sensorOrientation));
 
         MediaFormat format = null;
         for (Size s : codecOutputSizes) {
@@ -251,34 +278,59 @@ public class RecordService extends Service {
 
         MediaCodecList codecList = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
         String codecName = codecList.findEncoderForFormat(format);
-        try {
-            mediaCodec = MediaCodec.createByCodecName(codecName);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-
         format.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
 
-        db.delete(EncodedFramesContract.EncodedFrameEntry.TABLE_NAME, null, null);
-        sqlEncodedFramesId = 1;
-
-        mediaCodec.setCallback(mediaCodecCallback);
-
-        mediaCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
-        Surface codecInputSurface = mediaCodec.createInputSurface();
-        mediaCodec.start();
+        videoCodec = MediaCodec.createByCodecName(codecName);
+        videoCodec.setCallback(videoCodecCallback);
+        videoCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+        videoInputSurface = videoCodec.createInputSurface();
+        videoCodec.start();
 
         try {
             captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
             captureRequestBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
-            captureRequestBuilder.addTarget(codecInputSurface);
-            cameraDevice.createCaptureSession(Arrays.asList(codecInputSurface), captureSessionCallback, null);
+            captureRequestBuilder.addTarget(videoInputSurface);
+            cameraDevice.createCaptureSession(Arrays.asList(videoInputSurface), captureSessionCallback, null);
 
             videoRecordState = VideoRecordState.STARTING;
 
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
+    }
+
+    private void prepareAudioCodec() throws IOException {
+
+        MediaFormat format = MediaFormat.createAudioFormat("audio/mp4a-latm", audioSampleRate, 1);
+        format.setInteger(MediaFormat.KEY_BIT_RATE, 128000);
+        MediaCodecList codecList = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
+        String codecName = codecList.findEncoderForFormat(format);
+
+        audioCodec = MediaCodec.createByCodecName(codecName);
+        audioCodec.setCallback(audioCodecCallback);
+        audioCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+        audioCodec.start();
+
+        int minAudioBufferSize = AudioRecord.getMinBufferSize(
+                audioSampleRate,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT);
+
+        audioRecord = new AudioRecord(
+                MediaRecorder.AudioSource.CAMCORDER,
+                audioSampleRate,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                2 * minAudioBufferSize);
+
+        if (audioRecord.getState() == AudioRecord.STATE_INITIALIZED) {
+            audioRecord.startRecording();
+        } else {
+            Log.e(TAG, "audioRecord unitialized");
+        }
+    }
+
+    private void startGravitySensor() {
 
         SensorManager sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         List<Sensor> sensorList = sensorManager.getSensorList(Sensor.TYPE_GRAVITY);
@@ -286,6 +338,9 @@ public class RecordService extends Service {
             sensorList = sensorManager.getSensorList(Sensor.TYPE_ACCELEROMETER);
         }
         sensorManager.registerListener(sensorEventListener, sensorList.get(0), 1_000_000);
+    }
+
+    private void notifyForeground() {
 
         Intent notificationIntent = new Intent(this, MainActivity.class);
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, 0);
@@ -297,18 +352,18 @@ public class RecordService extends Service {
                 .setContentIntent(pendingIntent)
                 .build();
 
-        NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-//        notificationManager.notify(1, notification);
         startForeground(ONGOING_NOTIFICATION_ID, notification);
     }
 
-    private MediaCodec.Callback mediaCodecCallback = new MediaCodec.Callback() {
+    private MediaCodec.Callback videoCodecCallback = new MediaCodec.Callback() {
 
         @Override
         public void onInputBufferAvailable(@NonNull MediaCodec codec, int index) { }
 
         @Override
         public void onOutputBufferAvailable(@NonNull MediaCodec codec, int index, @NonNull MediaCodec.BufferInfo info) {
+
+            Log.d(TAG, "video output");
 
             if ((info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == MediaCodec.BUFFER_FLAG_CODEC_CONFIG) {
                 return;
@@ -326,6 +381,8 @@ public class RecordService extends Service {
 
             BufferDataInfoPair dataInfoPair = new BufferDataInfoPair(insertedId, info);
             bufferList.add(dataInfoPair);
+
+            lastPresentationTime = info.presentationTimeUs;
 
 //            Log.d(TAG, "Frames: " + String.valueOf(bufferList.size()));
 
@@ -355,6 +412,9 @@ public class RecordService extends Service {
                 try {
                     captureSession.abortCaptures();
                     captureSession.close();
+
+                    audioRecord.stop();
+                    audioRecord.release();
                 } catch (CameraAccessException e) {
                     e.printStackTrace();
                 }
@@ -369,11 +429,66 @@ public class RecordService extends Service {
         @Override
         public void onOutputFormatChanged(@NonNull MediaCodec codec, @NonNull MediaFormat format) {
 
-            if (mediaFormat == null) {
-                Log.d(TAG, "Format changed");
-                mediaFormat = format;
+            if (videoFormat == null) {
+                Log.d(TAG, "Video format changed");
+                videoFormat = format;
             } else {
-                Log.e(TAG, "Format already changed");
+                Log.e(TAG, "Video format already changed");
+            }
+        }
+    };
+
+    private MediaCodec.Callback audioCodecCallback = new MediaCodec.Callback() {
+
+        @Override
+        public void onInputBufferAvailable(@NonNull MediaCodec codec, int index) {
+
+            ByteBuffer buffer = codec.getInputBuffer(index);
+            int size = audioRecord.read(buffer, audioFrameBytes);
+            int flags = 0;
+            if (videoRecordState == VideoRecordState.STOPPING || videoRecordState == VideoRecordState.STOPPED) {
+                flags |= MediaCodec.BUFFER_FLAG_END_OF_STREAM;
+            }
+            codec.queueInputBuffer(index, 0, size, lastPresentationTime, flags);
+        }
+
+        @Override
+        public void onOutputBufferAvailable(@NonNull MediaCodec codec, int index, @NonNull MediaCodec.BufferInfo info) {
+
+            Log.d(TAG, "audio output");
+
+            if ((info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == MediaCodec.BUFFER_FLAG_CODEC_CONFIG) {
+                return;
+            }
+
+            ByteBuffer outputBuffer = codec.getOutputBuffer(index);
+            ByteBuffer cloneBuffer = ByteBuffer.allocate(outputBuffer.capacity());
+            outputBuffer.rewind();
+            cloneBuffer.put(outputBuffer);
+
+            byte[] bufferBytes = new byte[outputBuffer.remaining()];
+            outputBuffer.get(bufferBytes);
+
+            synchronized (lockObj) {
+                audioBufferAcc.put(outputBuffer);
+            }
+
+            codec.releaseOutputBuffer(index, false);
+        }
+
+        @Override
+        public void onError(@NonNull MediaCodec codec, @NonNull MediaCodec.CodecException e) {
+
+        }
+
+        @Override
+        public void onOutputFormatChanged(@NonNull MediaCodec codec, @NonNull MediaFormat format) {
+
+            if (audioFormat == null) {
+                Log.d(TAG, "Audio format changed");
+                audioFormat = format;
+            } else {
+                Log.e(TAG, "Audio format already changed");
             }
         }
     };
@@ -406,7 +521,8 @@ public class RecordService extends Service {
             Log.d(TAG, "Capture session closed");
 
             String state = Environment.getExternalStorageState();
-            if (Environment.MEDIA_MOUNTED.equals(state)) {
+            if (Environment.MEDIA_MOUNTED.equals(state)
+                    && ActivityCompat.checkSelfPermission(RecordService.this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
 
                 File savedFile = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "test.mp4");
                 String filePath = savedFile.getAbsolutePath();
@@ -417,8 +533,10 @@ public class RecordService extends Service {
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
-                int trackIndex = mediaMuxer.addTrack(mediaFormat);
+                int videoTrackIdx = mediaMuxer.addTrack(videoFormat);
+//                int audioTrackIdx = mediaMuxer.addTrack(audioFormat);
 
+                mediaMuxer.setOrientationHint(sensorOrientation);
                 mediaMuxer.start();
 
                 for (BufferDataInfoPair dataInfoPair : bufferList) {
@@ -443,14 +561,14 @@ public class RecordService extends Service {
 
                     cursor.close();
 
+                    mediaMuxer.writeSampleData(videoTrackIdx, buffer, info);
+
                     /*Log.d(TAG, "offset:" + String.valueOf(info.offset) +
                             " size:" + String.valueOf(info.size) +
                             " pt:" + String.valueOf(info.presentationTimeUs) +
                             " codec config:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) +
                             " keyframe:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) +
                             " EOS:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM));*/
-
-                    mediaMuxer.writeSampleData(trackIndex, buffer, info);
                 }
 
                 mediaMuxer.stop();
@@ -462,15 +580,20 @@ public class RecordService extends Service {
             }
 
             bufferList = new ArrayList<>();
-            mediaFormat = null;
+            videoFormat = null;
 
-            mediaCodec.stop();
-            mediaCodec.release();
+            videoCodec.stop();
+            videoCodec.release();
+            videoInputSurface.release();
+
+            audioCodec.stop();
+            audioCodec.release();
 
             videoRecordState = VideoRecordState.STOPPED;
 
             SensorManager sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
             sensorManager.unregisterListener(sensorEventListener);
+            resetOrientation();
 
             stopForeground(true);
 
@@ -481,13 +604,6 @@ public class RecordService extends Service {
     };
 
     private SensorEventListener sensorEventListener = new SensorEventListener() {
-
-        private final double G_THRESHOLD = SensorManager.GRAVITY_EARTH * sqrt(2) / 2;
-        private final int X_AXIS = 0;
-        private final int Y_AXIS = 1;
-        private int downAxis = X_AXIS;
-        private long timeAxisDown = 0;
-        private boolean orientationLocked = false;
 
         @Override
         public void onSensorChanged(SensorEvent event) {
@@ -530,6 +646,12 @@ public class RecordService extends Service {
         }
     };
 
+    private void resetOrientation() {
+        downAxis = -1;
+        timeAxisDown = 0;
+        orientationLocked = false;
+    }
+
     @Override
     public void onDestroy() {
 
@@ -545,7 +667,7 @@ public class RecordService extends Service {
 
         if (videoRecordState.equals(VideoRecordState.STARTED)) {
 
-            mediaCodec.signalEndOfInputStream();
+            videoCodec.signalEndOfInputStream();
 
             videoRecordState = VideoRecordState.STOPPING;
         }
