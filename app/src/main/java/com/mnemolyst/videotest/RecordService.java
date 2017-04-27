@@ -47,9 +47,12 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Calendar;
+import java.util.Comparator;
 import java.util.List;
 
 import static java.lang.Math.abs;
+import static java.lang.Math.max;
 import static java.lang.Math.sqrt;
 
 /**
@@ -81,7 +84,8 @@ public class RecordService extends Service {
 
     private AudioRecord audioRecord;
     private int audioSampleRate = 48000;
-    private int audioFrameBytes = audioSampleRate * 2 / 30;
+    private int audioChunkBytes = audioSampleRate * 2 / 24;
+//    private long audioTimeUsPerByte = 1_000_000 / (48000 * 2);
 
     private SQLiteOpenHelper videoSqlHelper;
     private SQLiteDatabase videoDb = null;
@@ -105,6 +109,16 @@ public class RecordService extends Service {
     static abstract class OnStopRecordCallback {
 
         abstract void onStopRecord();
+    }
+
+    static class BufferInfoComparator implements Comparator<BufferDataInfoPair> {
+
+        @Override
+        public int compare(BufferDataInfoPair o1, BufferDataInfoPair o2) {
+            long pt1 = o1.getBufferInfo().presentationTimeUs;
+            long pt2 = o2.getBufferInfo().presentationTimeUs;
+            return Long.compare(pt1, pt2);
+        }
     }
 
     class RecordServiceBinder extends Binder {
@@ -355,12 +369,14 @@ public class RecordService extends Service {
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT);
 
+        int audioBufferSize = max(minAudioBufferSize, audioChunkBytes * 2);
+
         audioRecord = new AudioRecord(
                 MediaRecorder.AudioSource.CAMCORDER,
                 audioSampleRate,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
-                2 * minAudioBufferSize);
+                audioBufferSize);
 
         if (audioRecord.getState() == AudioRecord.STATE_INITIALIZED) {
             audioRecord.startRecording();
@@ -392,8 +408,6 @@ public class RecordService extends Service {
 
             BufferDataInfoPair dataInfoPair = new BufferDataInfoPair(insertedId, info);
             videoBufferList.add(dataInfoPair);
-
-            lastPresentationTime = info.presentationTimeUs;
 
 //            Log.d(TAG, "Frames: " + String.valueOf(videoBufferList.size()));
 
@@ -457,14 +471,14 @@ public class RecordService extends Service {
         @Override
         public void onInputBufferAvailable(@NonNull MediaCodec codec, int index) {
 
-            Log.d(TAG, "audio in ts: " + String.valueOf(lastPresentationTime));
-            ByteBuffer buffer = codec.getInputBuffer(index);
-            int size = audioRecord.read(buffer, audioFrameBytes);
-            int flags = 0;
             if (recordState == RecordState.STOPPING || recordState == RecordState.STOPPED) {
-                flags |= MediaCodec.BUFFER_FLAG_END_OF_STREAM;
+                codec.queueInputBuffer(index, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+            } else {
+                ByteBuffer buffer = codec.getInputBuffer(index);
+                int size = audioRecord.read(buffer, audioChunkBytes);
+                long timeStamp = Calendar.getInstance().getTimeInMillis() * 1000;
+                codec.queueInputBuffer(index, 0, size, timeStamp, 0);
             }
-            codec.queueInputBuffer(index, 0, size, lastPresentationTime, flags);
         }
 
         @Override
@@ -584,6 +598,8 @@ public class RecordService extends Service {
                             " keyframe:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) +
                             " EOS:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM));*/
                 }
+
+                audioBufferList.sort(new BufferInfoComparator());
 
                 for (BufferDataInfoPair dataInfoPair : audioBufferList) {
 
