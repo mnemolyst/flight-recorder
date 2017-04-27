@@ -60,7 +60,7 @@ public class MainActivity extends Activity {
 
     private void toggleVideoRecord() {
 
-        if (recordService.getVideoRecordState().equals(RecordService.VideoRecordState.STOPPED)) {
+        if (recordService.getRecordState().equals(RecordService.RecordState.STOPPED)) {
 
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED
                     || ActivityCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
@@ -121,7 +121,7 @@ public class MainActivity extends Activity {
 
         super.onResume();
 
-        if (recordService != null && recordService.getVideoRecordState().equals(RecordService.VideoRecordState.STARTED)) {
+        if (recordService != null && recordService.getRecordState().equals(RecordService.RecordState.STARTED)) {
 
             btnRecord.setText(R.string.stop_button);
         }

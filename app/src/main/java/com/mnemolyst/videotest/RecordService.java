@@ -63,10 +63,10 @@ public class RecordService extends Service {
 
     private final Object lockObj = new Object();
 
-    enum VideoRecordState {
+    enum RecordState {
         STOPPING, STOPPED, STARTING, STARTED
     }
-    private VideoRecordState videoRecordState;
+    private RecordState recordState;
     private CameraDevice cameraDevice;
     private CaptureRequest.Builder captureRequestBuilder;
     private CameraCaptureSession captureSession;
@@ -75,17 +75,18 @@ public class RecordService extends Service {
     private MediaCodec audioCodec;
     private MediaFormat videoFormat;
     private MediaFormat audioFormat;
-    private ArrayList<BufferDataInfoPair> bufferList = new ArrayList<>();
+    private ArrayList<BufferDataInfoPair> videoBufferList = new ArrayList<>();
+    private ArrayList<BufferDataInfoPair> audioBufferList = new ArrayList<>();
     private long lastPresentationTime = 0;
 
     private AudioRecord audioRecord;
     private int audioSampleRate = 48000;
     private int audioFrameBytes = audioSampleRate * 2 / 30;
-    private ByteBuffer audioBufferAcc;
 
-    private SQLiteOpenHelper sqLiteOpenHelper = null;
-    private SQLiteDatabase db = null;
-    private int sqlEncodedFramesId = 1;
+    private SQLiteOpenHelper videoSqlHelper;
+    private SQLiteDatabase videoDb = null;
+    private SQLiteOpenHelper audioSqlHelper;
+    private SQLiteDatabase audioDb = null;
     private int maxFrames = 30*5;
     private Integer sensorOrientation = 0;
 
@@ -114,26 +115,60 @@ public class RecordService extends Service {
         }
     }
 
-    private class EncodedFramesContract {
+    private class EncodedVideoContract {
 
-        private EncodedFramesContract() {};
-
-        class EncodedFrameEntry implements BaseColumns {
-            static final String TABLE_NAME = "encoded_frames";
-            static final String FRAME_DATA_COLUMN_NAME = "frame_data";
+        class Schema implements BaseColumns {
+            static final String TABLE_NAME = "encoded_video";
+            static final String VIDEO_DATA_COLUMN_NAME = "video_data";
         }
     }
 
-    private class EncodedFramesHelper extends SQLiteOpenHelper {
+    private class EncodedAudioContract {
+
+        class Schema implements BaseColumns {
+            static final String TABLE_NAME = "encoded_audio";
+            static final String AUDIO_DATA_COLUMN_NAME = "audio_data";
+        }
+    }
+
+    private class EncodedVideoHelper extends SQLiteOpenHelper {
 
         static final int DATABASE_VERSION = 1;
-        static final String DATABASE_NAME = "EncodedFrames.db";
-        private static final String SQL_CREATE_TABLES =
-                "CREATE TABLE " + EncodedFramesContract.EncodedFrameEntry.TABLE_NAME + " (" +
-                        EncodedFramesContract.EncodedFrameEntry._ID + " INTEGER PRIMARY KEY, " +
-                        EncodedFramesContract.EncodedFrameEntry.FRAME_DATA_COLUMN_NAME + " BLOB)";
+        static final String DATABASE_NAME = "EncodedVideo.db";
 
-        EncodedFramesHelper(Context context) {
+        private static final String SQL_CREATE_TABLES =
+                "CREATE TABLE " + EncodedVideoContract.Schema.TABLE_NAME + " (" +
+                        EncodedVideoContract.Schema._ID + " INTEGER PRIMARY KEY, " +
+                        EncodedVideoContract.Schema.VIDEO_DATA_COLUMN_NAME + " BLOB)";
+
+        EncodedVideoHelper(Context context) {
+
+            super(context, DATABASE_NAME, null, DATABASE_VERSION);
+        }
+
+        @Override
+        public void onCreate(SQLiteDatabase db) {
+
+            db.execSQL(SQL_CREATE_TABLES);
+        }
+
+        @Override
+        public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+
+        }
+    }
+
+    private class EncodedAudioHelper extends SQLiteOpenHelper {
+
+        static final int DATABASE_VERSION = 1;
+        static final String DATABASE_NAME = "EncodedAudio.db";
+
+        private static final String SQL_CREATE_TABLES =
+                "CREATE TABLE " + EncodedAudioContract.Schema.TABLE_NAME + " (" +
+                        EncodedAudioContract.Schema._ID + " INTEGER PRIMARY KEY, " +
+                        EncodedAudioContract.Schema.AUDIO_DATA_COLUMN_NAME + " BLOB)";
+
+        EncodedAudioHelper(Context context) {
 
             super(context, DATABASE_NAME, null, DATABASE_VERSION);
         }
@@ -156,7 +191,7 @@ public class RecordService extends Service {
 
             public void run() {
 
-                doStartRecord();
+                openCamera();
             }
         }).run();
     }
@@ -164,9 +199,13 @@ public class RecordService extends Service {
     @Override
     public void onCreate() {
 
-        videoRecordState = VideoRecordState.STOPPED;
-        sqLiteOpenHelper = new EncodedFramesHelper(this);
-        db = sqLiteOpenHelper.getWritableDatabase();
+        recordState = RecordState.STOPPED;
+
+        videoSqlHelper = new EncodedVideoHelper(this);
+        videoDb = videoSqlHelper.getWritableDatabase();
+
+        audioSqlHelper = new EncodedAudioHelper(this);
+        audioDb = audioSqlHelper.getWritableDatabase();
     }
 
     @Override
@@ -187,7 +226,7 @@ public class RecordService extends Service {
         onStopRecordCallback = callback;
     }
 
-    private void doStartRecord() {
+    private void openCamera() {
 
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             return;
@@ -224,8 +263,8 @@ public class RecordService extends Service {
 
     private void prepareForRecording() {
 
-        db.delete(EncodedFramesContract.EncodedFrameEntry.TABLE_NAME, null, null);
-        sqlEncodedFramesId = 1;
+        videoDb.delete(EncodedVideoContract.Schema.TABLE_NAME, null, null);
+        audioDb.delete(EncodedAudioContract.Schema.TABLE_NAME, null, null);
 
         try {
             prepareVideoCodec();
@@ -292,7 +331,7 @@ public class RecordService extends Service {
             captureRequestBuilder.addTarget(videoInputSurface);
             cameraDevice.createCaptureSession(Arrays.asList(videoInputSurface), captureSessionCallback, null);
 
-            videoRecordState = VideoRecordState.STARTING;
+            recordState = RecordState.STARTING;
 
         } catch (CameraAccessException e) {
             e.printStackTrace();
@@ -330,31 +369,6 @@ public class RecordService extends Service {
         }
     }
 
-    private void startGravitySensor() {
-
-        SensorManager sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
-        List<Sensor> sensorList = sensorManager.getSensorList(Sensor.TYPE_GRAVITY);
-        if (sensorList.isEmpty()) {
-            sensorList = sensorManager.getSensorList(Sensor.TYPE_ACCELEROMETER);
-        }
-        sensorManager.registerListener(sensorEventListener, sensorList.get(0), 1_000_000);
-    }
-
-    private void notifyForeground() {
-
-        Intent notificationIntent = new Intent(this, MainActivity.class);
-        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, 0);
-
-        Notification notification = new Notification.Builder(this)
-                .setContentTitle(getText(R.string.notification_title))
-                .setContentText(getText(R.string.notification_message))
-                .setSmallIcon(R.drawable.recording_notification_icon)
-                .setContentIntent(pendingIntent)
-                .build();
-
-        startForeground(ONGOING_NOTIFICATION_ID, notification);
-    }
-
     private MediaCodec.Callback videoCodecCallback = new MediaCodec.Callback() {
 
         @Override
@@ -362,8 +376,6 @@ public class RecordService extends Service {
 
         @Override
         public void onOutputBufferAvailable(@NonNull MediaCodec codec, int index, @NonNull MediaCodec.BufferInfo info) {
-
-            Log.d(TAG, "video output");
 
             if ((info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == MediaCodec.BUFFER_FLAG_CODEC_CONFIG) {
                 return;
@@ -375,35 +387,37 @@ public class RecordService extends Service {
             outputBuffer.get(bufferBytes);
 
             ContentValues contentValues = new ContentValues();
-            contentValues.put(EncodedFramesContract.EncodedFrameEntry._ID, sqlEncodedFramesId++);
-            contentValues.put(EncodedFramesContract.EncodedFrameEntry.FRAME_DATA_COLUMN_NAME, bufferBytes);
-            long insertedId = db.insert(EncodedFramesContract.EncodedFrameEntry.TABLE_NAME, null, contentValues);
+            contentValues.put(EncodedVideoContract.Schema.VIDEO_DATA_COLUMN_NAME, bufferBytes);
+            long insertedId = videoDb.insert(EncodedVideoContract.Schema.TABLE_NAME, null, contentValues);
 
             BufferDataInfoPair dataInfoPair = new BufferDataInfoPair(insertedId, info);
-            bufferList.add(dataInfoPair);
+            videoBufferList.add(dataInfoPair);
 
             lastPresentationTime = info.presentationTimeUs;
 
-//            Log.d(TAG, "Frames: " + String.valueOf(bufferList.size()));
+//            Log.d(TAG, "Frames: " + String.valueOf(videoBufferList.size()));
 
-            if (bufferList.size() > maxFrames) {
+            if (videoBufferList.size() > maxFrames) {
 
-                int minFrameIdx = bufferList.size() - maxFrames;
+                int minFrameIdx = videoBufferList.size() - maxFrames;
 
-                long minFrameId = bufferList.get(minFrameIdx).getDataId();
-                db.delete(
-                        EncodedFramesContract.EncodedFrameEntry.TABLE_NAME,
-                        EncodedFramesContract.EncodedFrameEntry._ID + " < ?",
-                        new String[] { String.valueOf(minFrameId) }
+                long minVideoId = videoBufferList.get(minFrameIdx).getDataId();
+                videoDb.delete(
+                        EncodedVideoContract.Schema.TABLE_NAME,
+                        EncodedVideoContract.Schema._ID + " < ?",
+                        new String[] { String.valueOf(minVideoId) }
                 );
 
-                bufferList.subList(0, minFrameIdx).clear();
-            }
+                long minAudioId = audioBufferList.get(minFrameIdx).getDataId();
+                audioDb.delete(
+                        EncodedAudioContract.Schema.TABLE_NAME,
+                        EncodedAudioContract.Schema._ID + " < ?",
+                        new String[] { String.valueOf(minAudioId) }
+                );
 
-            Cursor cursor = db.rawQuery("SELECT COUNT(*) FROM encoded_frames", null, null);
-            cursor.moveToFirst();
-            Log.d(TAG, cursor.getString(0) + " rows");
-            cursor.close();
+                videoBufferList.subList(0, minFrameIdx).clear();
+                audioBufferList.subList(0, minFrameIdx).clear();
+            }
 
             codec.releaseOutputBuffer(index, false);
 
@@ -443,10 +457,11 @@ public class RecordService extends Service {
         @Override
         public void onInputBufferAvailable(@NonNull MediaCodec codec, int index) {
 
+            Log.d(TAG, "audio in ts: " + String.valueOf(lastPresentationTime));
             ByteBuffer buffer = codec.getInputBuffer(index);
             int size = audioRecord.read(buffer, audioFrameBytes);
             int flags = 0;
-            if (videoRecordState == VideoRecordState.STOPPING || videoRecordState == VideoRecordState.STOPPED) {
+            if (recordState == RecordState.STOPPING || recordState == RecordState.STOPPED) {
                 flags |= MediaCodec.BUFFER_FLAG_END_OF_STREAM;
             }
             codec.queueInputBuffer(index, 0, size, lastPresentationTime, flags);
@@ -455,23 +470,23 @@ public class RecordService extends Service {
         @Override
         public void onOutputBufferAvailable(@NonNull MediaCodec codec, int index, @NonNull MediaCodec.BufferInfo info) {
 
-            Log.d(TAG, "audio output");
-
             if ((info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == MediaCodec.BUFFER_FLAG_CODEC_CONFIG) {
                 return;
             }
 
+            Log.d(TAG, "audio out ts: " + String.valueOf(info.presentationTimeUs));
+
             ByteBuffer outputBuffer = codec.getOutputBuffer(index);
-            ByteBuffer cloneBuffer = ByteBuffer.allocate(outputBuffer.capacity());
-            outputBuffer.rewind();
-            cloneBuffer.put(outputBuffer);
 
             byte[] bufferBytes = new byte[outputBuffer.remaining()];
             outputBuffer.get(bufferBytes);
 
-            synchronized (lockObj) {
-                audioBufferAcc.put(outputBuffer);
-            }
+            ContentValues contentValues = new ContentValues();
+            contentValues.put(EncodedAudioContract.Schema.AUDIO_DATA_COLUMN_NAME, bufferBytes);
+            long insertedId = audioDb.insert(EncodedAudioContract.Schema.TABLE_NAME, null, contentValues);
+
+            BufferDataInfoPair dataInfoPair = new BufferDataInfoPair(insertedId, info);
+            audioBufferList.add(dataInfoPair);
 
             codec.releaseOutputBuffer(index, false);
         }
@@ -505,7 +520,7 @@ public class RecordService extends Service {
 
             try {
                 session.setRepeatingRequest(captureRequestBuilder.build(), null, null);
-                videoRecordState = VideoRecordState.STARTED;
+                recordState = RecordState.STARTED;
             } catch (CameraAccessException e) {
                 e.printStackTrace();
             }
@@ -534,29 +549,28 @@ public class RecordService extends Service {
                     e.printStackTrace();
                 }
                 int videoTrackIdx = mediaMuxer.addTrack(videoFormat);
-//                int audioTrackIdx = mediaMuxer.addTrack(audioFormat);
+                int audioTrackIdx = mediaMuxer.addTrack(audioFormat);
 
                 mediaMuxer.setOrientationHint(sensorOrientation);
                 mediaMuxer.start();
 
-                for (BufferDataInfoPair dataInfoPair : bufferList) {
+                for (BufferDataInfoPair dataInfoPair : videoBufferList) {
 
                     long bufferId = dataInfoPair.getDataId();
-                    MediaCodec.BufferInfo info = dataInfoPair.getInfo();
-                    Cursor cursor = db.query(EncodedFramesContract.EncodedFrameEntry.TABLE_NAME,
+                    MediaCodec.BufferInfo info = dataInfoPair.getBufferInfo();
+
+                    Cursor cursor = videoDb.query(EncodedVideoContract.Schema.TABLE_NAME,
                             null,
-                            EncodedFramesContract.EncodedFrameEntry._ID + " = " + String.valueOf(bufferId),
-                            null,
-                            null,
-                            null,
-                            EncodedFramesContract.EncodedFrameEntry._ID + " ASC");
+                            EncodedVideoContract.Schema._ID + " = " + String.valueOf(bufferId),
+                            null, null, null,
+                            EncodedVideoContract.Schema._ID + " ASC");
 
                     if (! cursor.moveToFirst()) {
                         continue;
                     }
 
                     ByteBuffer buffer = ByteBuffer.wrap(cursor.getBlob(
-                            cursor.getColumnIndex(EncodedFramesContract.EncodedFrameEntry.FRAME_DATA_COLUMN_NAME)
+                            cursor.getColumnIndex(EncodedVideoContract.Schema.VIDEO_DATA_COLUMN_NAME)
                     ));
 
                     cursor.close();
@@ -571,16 +585,52 @@ public class RecordService extends Service {
                             " EOS:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM));*/
                 }
 
+                for (BufferDataInfoPair dataInfoPair : audioBufferList) {
+
+                    long bufferId = dataInfoPair.getDataId();
+                    MediaCodec.BufferInfo info = dataInfoPair.getBufferInfo();
+                    Log.d(TAG, "audio ts: " + String.valueOf(info.presentationTimeUs));
+
+                    Cursor cursor = audioDb.query(EncodedAudioContract.Schema.TABLE_NAME,
+                            null,
+                            EncodedAudioContract.Schema._ID + " = " + String.valueOf(bufferId),
+                            null, null, null,
+                            EncodedAudioContract.Schema._ID + " ASC");
+
+                    if (! cursor.moveToFirst()) {
+                        continue;
+                    }
+
+                    ByteBuffer buffer = ByteBuffer.wrap(cursor.getBlob(
+                            cursor.getColumnIndex(EncodedAudioContract.Schema.AUDIO_DATA_COLUMN_NAME)
+                    ));
+
+                    cursor.close();
+
+                    mediaMuxer.writeSampleData(audioTrackIdx, buffer, info);
+
+                    /*Log.d(TAG, "offset:" + String.valueOf(info.offset) +
+                            " size:" + String.valueOf(info.size) +
+                            " pt:" + String.valueOf(info.presentationTimeUs) +
+                            " codec config:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) +
+                            " keyframe:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) +
+                            " EOS:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM));*/
+                }
+
                 mediaMuxer.stop();
                 mediaMuxer.release();
 
-                db.delete(EncodedFramesContract.EncodedFrameEntry.TABLE_NAME, null, null);
+                videoDb.delete(EncodedVideoContract.Schema.TABLE_NAME, null, null);
+                audioDb.delete(EncodedAudioContract.Schema.TABLE_NAME, null, null);
             } else {
                 Log.e(TAG, "External media unavailable: " + state);
             }
 
-            bufferList = new ArrayList<>();
+            videoBufferList = new ArrayList<>();
             videoFormat = null;
+
+            audioBufferList = new ArrayList<>();
+            audioFormat = null;
 
             videoCodec.stop();
             videoCodec.release();
@@ -589,7 +639,7 @@ public class RecordService extends Service {
             audioCodec.stop();
             audioCodec.release();
 
-            videoRecordState = VideoRecordState.STOPPED;
+            recordState = RecordState.STOPPED;
 
             SensorManager sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
             sensorManager.unregisterListener(sensorEventListener);
@@ -602,6 +652,16 @@ public class RecordService extends Service {
             }
         }
     };
+
+    private void startGravitySensor() {
+
+        SensorManager sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        List<Sensor> sensorList = sensorManager.getSensorList(Sensor.TYPE_GRAVITY);
+        if (sensorList.isEmpty()) {
+            sensorList = sensorManager.getSensorList(Sensor.TYPE_ACCELEROMETER);
+        }
+        sensorManager.registerListener(sensorEventListener, sensorList.get(0), 1_000_000);
+    }
 
     private SensorEventListener sensorEventListener = new SensorEventListener() {
 
@@ -646,6 +706,21 @@ public class RecordService extends Service {
         }
     };
 
+    private void notifyForeground() {
+
+        Intent notificationIntent = new Intent(this, MainActivity.class);
+        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, 0);
+
+        Notification notification = new Notification.Builder(this)
+                .setContentTitle(getText(R.string.notification_title))
+                .setContentText(getText(R.string.notification_message))
+                .setSmallIcon(R.drawable.recording_notification_icon)
+                .setContentIntent(pendingIntent)
+                .build();
+
+        startForeground(ONGOING_NOTIFICATION_ID, notification);
+    }
+
     private void resetOrientation() {
         downAxis = -1;
         timeAxisDown = 0;
@@ -655,21 +730,21 @@ public class RecordService extends Service {
     @Override
     public void onDestroy() {
 
-        db.close();
+        videoDb.close();
         Log.d(TAG, "Destroyed");
     }
 
-    VideoRecordState getVideoRecordState() {
-        return videoRecordState;
+    RecordState getRecordState() {
+        return recordState;
     }
 
     void stopRecording() {
 
-        if (videoRecordState.equals(VideoRecordState.STARTED)) {
+        if (recordState.equals(RecordState.STARTED)) {
 
             videoCodec.signalEndOfInputStream();
 
-            videoRecordState = VideoRecordState.STOPPING;
+            recordState = RecordState.STOPPING;
         }
     }
 }
