@@ -80,18 +80,18 @@ public class RecordService extends Service {
     private MediaFormat audioFormat;
     private ArrayList<BufferDataInfoPair> videoBufferList = new ArrayList<>();
     private ArrayList<BufferDataInfoPair> audioBufferList = new ArrayList<>();
-    private long lastPresentationTime = 0;
 
     private AudioRecord audioRecord;
     private int audioSampleRate = 48000;
     private int audioChunkBytes = audioSampleRate * 2 / 24;
-//    private long audioTimeUsPerByte = 1_000_000 / (48000 * 2);
+    private long audioPresentationTimeUs = -1;
+    private long audioTimeNsPerByte = 1_000_000_000 / (audioSampleRate * 2);
 
     private SQLiteOpenHelper videoSqlHelper;
     private SQLiteDatabase videoDb = null;
     private SQLiteOpenHelper audioSqlHelper;
     private SQLiteDatabase audioDb = null;
-    private int maxFrames = 30*5;
+    private int maxFrames = 30 * 5;
     private Integer sensorOrientation = 0;
 
     // Gravity sensor event listener variables
@@ -109,16 +109,6 @@ public class RecordService extends Service {
     static abstract class OnStopRecordCallback {
 
         abstract void onStopRecord();
-    }
-
-    static class BufferInfoComparator implements Comparator<BufferDataInfoPair> {
-
-        @Override
-        public int compare(BufferDataInfoPair o1, BufferDataInfoPair o2) {
-            long pt1 = o1.getBufferInfo().presentationTimeUs;
-            long pt2 = o2.getBufferInfo().presentationTimeUs;
-            return Long.compare(pt1, pt2);
-        }
     }
 
     class RecordServiceBinder extends Binder {
@@ -211,7 +201,7 @@ public class RecordService extends Service {
     }
 
     @Override
-    public void onCreate() {
+    public IBinder onBind(Intent intent) {
 
         recordState = RecordState.STOPPED;
 
@@ -220,10 +210,6 @@ public class RecordService extends Service {
 
         audioSqlHelper = new EncodedAudioHelper(this);
         audioDb = audioSqlHelper.getWritableDatabase();
-    }
-
-    @Override
-    public IBinder onBind(Intent intent) {
 
         return binder;
     }
@@ -362,7 +348,7 @@ public class RecordService extends Service {
         audioCodec = MediaCodec.createByCodecName(codecName);
         audioCodec.setCallback(audioCodecCallback);
         audioCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
-        audioCodec.start();
+//        audioCodec.start();
 
         int minAudioBufferSize = AudioRecord.getMinBufferSize(
                 audioSampleRate,
@@ -379,7 +365,7 @@ public class RecordService extends Service {
                 audioBufferSize);
 
         if (audioRecord.getState() == AudioRecord.STATE_INITIALIZED) {
-            audioRecord.startRecording();
+//            audioRecord.startRecording();
         } else {
             Log.e(TAG, "audioRecord unitialized");
         }
@@ -397,6 +383,16 @@ public class RecordService extends Service {
                 return;
             }
 
+            // Once video capture begins, start audio capture.
+            if (audioPresentationTimeUs == -1) {
+
+                Log.d(TAG, "start audio");
+
+                audioCodec.start();
+                audioRecord.startRecording();
+                audioPresentationTimeUs = info.presentationTimeUs - audioChunkBytes * audioTimeNsPerByte / 1000;
+            }
+
             ByteBuffer outputBuffer = codec.getOutputBuffer(index);
 
             byte[] bufferBytes = new byte[outputBuffer.remaining()];
@@ -411,41 +407,61 @@ public class RecordService extends Service {
 
 //            Log.d(TAG, "Frames: " + String.valueOf(videoBufferList.size()));
 
+            if (audioBufferList.size() > 0) {
+                Log.d(TAG, "min video pt: " + String.valueOf(videoBufferList.get(0).getBufferInfo().presentationTimeUs));
+                Log.d(TAG, "max video pt: " + String.valueOf(videoBufferList.get(videoBufferList.size() - 1).getBufferInfo().presentationTimeUs));
+                Log.d(TAG, "video del: " + String.valueOf(videoBufferList.get(videoBufferList.size() - 1).getBufferInfo().presentationTimeUs - videoBufferList.get(0).getBufferInfo().presentationTimeUs));
+                Log.d(TAG, "min audio pt: " + String.valueOf(audioBufferList.get(0).getBufferInfo().presentationTimeUs));
+                Log.d(TAG, "max audio pt: " + String.valueOf(audioBufferList.get(audioBufferList.size() - 1).getBufferInfo().presentationTimeUs));
+                Log.d(TAG, "audio del: " + String.valueOf(audioBufferList.get(audioBufferList.size() - 1).getBufferInfo().presentationTimeUs - audioBufferList.get(0).getBufferInfo().presentationTimeUs));
+            }
+
             if (videoBufferList.size() > maxFrames) {
+                Log.d(TAG, "CUT");
 
-                int minFrameIdx = videoBufferList.size() - maxFrames;
+                int minVideoIdx = 0;
+                for (int i = videoBufferList.size() - maxFrames; i < videoBufferList.size(); i++) {
+                    if ((videoBufferList.get(i).getBufferInfo().flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) == MediaCodec.BUFFER_FLAG_KEY_FRAME) {
+                        minVideoIdx = i;
+                        break;
+                    }
+                }
+                Log.d(TAG, "mvi: " + String.valueOf(minVideoIdx));
 
-                long minVideoId = videoBufferList.get(minFrameIdx).getDataId();
+                long minVideoId = videoBufferList.get(minVideoIdx).getDataId();
+                long minPresentationTime = videoBufferList.get(minVideoIdx).getBufferInfo().presentationTimeUs;
+                Log.d(TAG, "mpt: " + String.valueOf(minPresentationTime));
                 videoDb.delete(
                         EncodedVideoContract.Schema.TABLE_NAME,
                         EncodedVideoContract.Schema._ID + " < ?",
                         new String[] { String.valueOf(minVideoId) }
                 );
 
-                long minAudioId = audioBufferList.get(minFrameIdx).getDataId();
+                int minAudioIdx = 0;
+                for (int i = 0; i < audioBufferList.size(); i++) {
+                    Log.d(TAG, "audio buffer: " + String.valueOf(i) + " pt: " + String.valueOf(audioBufferList.get(i).getBufferInfo().presentationTimeUs));
+                    if (audioBufferList.get(i).getBufferInfo().presentationTimeUs >= minPresentationTime) {
+                        Log.d(TAG, "mai: " + String.valueOf(i));
+                        minAudioIdx = i;
+                        break;
+                    }
+                }
+
+                long minAudioId = audioBufferList.get(minAudioIdx).getDataId();
                 audioDb.delete(
                         EncodedAudioContract.Schema.TABLE_NAME,
                         EncodedAudioContract.Schema._ID + " < ?",
                         new String[] { String.valueOf(minAudioId) }
                 );
 
-                videoBufferList.subList(0, minFrameIdx).clear();
-                audioBufferList.subList(0, minFrameIdx).clear();
+                videoBufferList.subList(0, minVideoIdx).clear();
+                audioBufferList.subList(0, minAudioIdx).clear();
             }
 
             codec.releaseOutputBuffer(index, false);
 
             if ((info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) == MediaCodec.BUFFER_FLAG_END_OF_STREAM) {
 
-                try {
-                    captureSession.abortCaptures();
-                    captureSession.close();
-
-                    audioRecord.stop();
-                    audioRecord.release();
-                } catch (CameraAccessException e) {
-                    e.printStackTrace();
-                }
             }
         }
 
@@ -476,8 +492,8 @@ public class RecordService extends Service {
             } else {
                 ByteBuffer buffer = codec.getInputBuffer(index);
                 int size = audioRecord.read(buffer, audioChunkBytes);
-                long timeStamp = Calendar.getInstance().getTimeInMillis() * 1000;
-                codec.queueInputBuffer(index, 0, size, timeStamp, 0);
+                audioPresentationTimeUs += (size * audioTimeNsPerByte) / 1000;
+                codec.queueInputBuffer(index, 0, size, audioPresentationTimeUs, 0);
             }
         }
 
@@ -568,10 +584,12 @@ public class RecordService extends Service {
                 mediaMuxer.setOrientationHint(sensorOrientation);
                 mediaMuxer.start();
 
+                Log.d(TAG, "before video");
                 for (BufferDataInfoPair dataInfoPair : videoBufferList) {
 
                     long bufferId = dataInfoPair.getDataId();
                     MediaCodec.BufferInfo info = dataInfoPair.getBufferInfo();
+                    Log.d(TAG, "video ts: " + String.valueOf(info.presentationTimeUs));
 
                     Cursor cursor = videoDb.query(EncodedVideoContract.Schema.TABLE_NAME,
                             null,
@@ -599,8 +617,7 @@ public class RecordService extends Service {
                             " EOS:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM));*/
                 }
 
-                audioBufferList.sort(new BufferInfoComparator());
-
+                Log.d(TAG, "before audio");
                 for (BufferDataInfoPair dataInfoPair : audioBufferList) {
 
                     long bufferId = dataInfoPair.getDataId();
@@ -624,14 +641,8 @@ public class RecordService extends Service {
                     cursor.close();
 
                     mediaMuxer.writeSampleData(audioTrackIdx, buffer, info);
-
-                    /*Log.d(TAG, "offset:" + String.valueOf(info.offset) +
-                            " size:" + String.valueOf(info.size) +
-                            " pt:" + String.valueOf(info.presentationTimeUs) +
-                            " codec config:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) +
-                            " keyframe:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) +
-                            " EOS:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM));*/
                 }
+                Log.d(TAG, "after audio");
 
                 mediaMuxer.stop();
                 mediaMuxer.release();
@@ -655,7 +666,11 @@ public class RecordService extends Service {
             audioCodec.stop();
             audioCodec.release();
 
+            audioPresentationTimeUs = -1;
+
             recordState = RecordState.STOPPED;
+
+            cameraDevice.close();
 
             SensorManager sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
             sensorManager.unregisterListener(sensorEventListener);
@@ -757,6 +772,16 @@ public class RecordService extends Service {
     void stopRecording() {
 
         if (recordState.equals(RecordState.STARTED)) {
+
+            try {
+                captureSession.abortCaptures();
+                captureSession.close();
+
+                audioRecord.stop();
+                audioRecord.release();
+            } catch (CameraAccessException e) {
+                e.printStackTrace();
+            }
 
             videoCodec.signalEndOfInputStream();
 
