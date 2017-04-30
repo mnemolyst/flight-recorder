@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Video Test</string>
+    <string name="app_name">Black Box</string>
     <string name="start_button">Record</string>
     <string name="stop_button">Stop</string>
     <string name="title_activity_main">MainActivity</string>

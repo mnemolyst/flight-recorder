@@ -48,12 +48,12 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
-import java.util.Comparator;
 import java.util.List;
 
+import static java.lang.Math.PI;
 import static java.lang.Math.abs;
 import static java.lang.Math.max;
-import static java.lang.Math.sqrt;
+import static java.lang.Math.sin;
 
 /**
  * An {@link IntentService} subclass for handling asynchronous task requests in
@@ -69,7 +69,11 @@ public class RecordService extends Service {
     enum RecordState {
         STOPPING, STOPPED, STARTING, STARTED
     }
+    enum DownAxis {
+        NONE, X_POS, X_NEG, Y_POS, Y_NEG
+    }
     private RecordState recordState;
+    private DownAxis downAxis = DownAxis.NONE;
     private CameraDevice cameraDevice;
     private CaptureRequest.Builder captureRequestBuilder;
     private CameraCaptureSession captureSession;
@@ -84,21 +88,17 @@ public class RecordService extends Service {
     private AudioRecord audioRecord;
     private int audioSampleRate = 48000;
     private int audioChunkBytes = audioSampleRate * 2 / 24;
-    private long audioPresentationTimeUs = -1;
-    private long audioTimeNsPerByte = 1_000_000_000 / (audioSampleRate * 2);
+    private long calPtDiff = -1;
 
     private SQLiteOpenHelper videoSqlHelper;
     private SQLiteDatabase videoDb = null;
     private SQLiteOpenHelper audioSqlHelper;
     private SQLiteDatabase audioDb = null;
-    private int maxFrames = 30 * 5;
+    private int maxFrames = 30 * 30;
     private Integer sensorOrientation = 0;
 
     // Gravity sensor event listener variables
-    private final double G_THRESHOLD = SensorManager.GRAVITY_EARTH * sqrt(2) / 2;
-    private final int X_AXIS = 0;
-    private final int Y_AXIS = 1;
-    private int downAxis = -1;
+    private final double G_THRESHOLD = SensorManager.GRAVITY_EARTH * sin(PI / 6);
     private long timeAxisDown = 0;
     private boolean orientationLocked = false;
 
@@ -365,7 +365,7 @@ public class RecordService extends Service {
                 audioBufferSize);
 
         if (audioRecord.getState() == AudioRecord.STATE_INITIALIZED) {
-//            audioRecord.startRecording();
+            audioRecord.startRecording();
         } else {
             Log.e(TAG, "audioRecord unitialized");
         }
@@ -384,13 +384,10 @@ public class RecordService extends Service {
             }
 
             // Once video capture begins, start audio capture.
-            if (audioPresentationTimeUs == -1) {
-
-                Log.d(TAG, "start audio");
+            if (calPtDiff == -1) {
 
                 audioCodec.start();
-                audioRecord.startRecording();
-                audioPresentationTimeUs = info.presentationTimeUs - audioChunkBytes * audioTimeNsPerByte / 1000;
+                calPtDiff = info.presentationTimeUs - Calendar.getInstance().getTimeInMillis() * 1000;
             }
 
             ByteBuffer outputBuffer = codec.getOutputBuffer(index);
@@ -407,14 +404,14 @@ public class RecordService extends Service {
 
 //            Log.d(TAG, "Frames: " + String.valueOf(videoBufferList.size()));
 
-            if (audioBufferList.size() > 0) {
+            /*if (audioBufferList.size() > 0) {
                 Log.d(TAG, "min video pt: " + String.valueOf(videoBufferList.get(0).getBufferInfo().presentationTimeUs));
                 Log.d(TAG, "max video pt: " + String.valueOf(videoBufferList.get(videoBufferList.size() - 1).getBufferInfo().presentationTimeUs));
                 Log.d(TAG, "video del: " + String.valueOf(videoBufferList.get(videoBufferList.size() - 1).getBufferInfo().presentationTimeUs - videoBufferList.get(0).getBufferInfo().presentationTimeUs));
                 Log.d(TAG, "min audio pt: " + String.valueOf(audioBufferList.get(0).getBufferInfo().presentationTimeUs));
                 Log.d(TAG, "max audio pt: " + String.valueOf(audioBufferList.get(audioBufferList.size() - 1).getBufferInfo().presentationTimeUs));
                 Log.d(TAG, "audio del: " + String.valueOf(audioBufferList.get(audioBufferList.size() - 1).getBufferInfo().presentationTimeUs - audioBufferList.get(0).getBufferInfo().presentationTimeUs));
-            }
+            }*/
 
             if (videoBufferList.size() > maxFrames) {
                 Log.d(TAG, "CUT");
@@ -492,8 +489,8 @@ public class RecordService extends Service {
             } else {
                 ByteBuffer buffer = codec.getInputBuffer(index);
                 int size = audioRecord.read(buffer, audioChunkBytes);
-                audioPresentationTimeUs += (size * audioTimeNsPerByte) / 1000;
-                codec.queueInputBuffer(index, 0, size, audioPresentationTimeUs, 0);
+                long presentationTime = Calendar.getInstance().getTimeInMillis() * 1000 + calPtDiff;
+                codec.queueInputBuffer(index, 0, size, presentationTime, 0);
             }
         }
 
@@ -585,10 +582,16 @@ public class RecordService extends Service {
                 mediaMuxer.start();
 
                 Log.d(TAG, "before video");
+                long latestPt = 0;
                 for (BufferDataInfoPair dataInfoPair : videoBufferList) {
 
                     long bufferId = dataInfoPair.getDataId();
                     MediaCodec.BufferInfo info = dataInfoPair.getBufferInfo();
+                    if (info.presentationTimeUs > latestPt) {
+                        latestPt = info.presentationTimeUs;
+                    } else {
+                        continue;
+                    }
                     Log.d(TAG, "video ts: " + String.valueOf(info.presentationTimeUs));
 
                     Cursor cursor = videoDb.query(EncodedVideoContract.Schema.TABLE_NAME,
@@ -618,10 +621,16 @@ public class RecordService extends Service {
                 }
 
                 Log.d(TAG, "before audio");
+                latestPt = 0;
                 for (BufferDataInfoPair dataInfoPair : audioBufferList) {
 
                     long bufferId = dataInfoPair.getDataId();
                     MediaCodec.BufferInfo info = dataInfoPair.getBufferInfo();
+                    if (info.presentationTimeUs > latestPt) {
+                        latestPt = info.presentationTimeUs;
+                    } else {
+                        continue;
+                    }
                     Log.d(TAG, "audio ts: " + String.valueOf(info.presentationTimeUs));
 
                     Cursor cursor = audioDb.query(EncodedAudioContract.Schema.TABLE_NAME,
@@ -666,7 +675,7 @@ public class RecordService extends Service {
             audioCodec.stop();
             audioCodec.release();
 
-            audioPresentationTimeUs = -1;
+            calPtDiff = -1;
 
             recordState = RecordState.STOPPED;
 
@@ -692,41 +701,60 @@ public class RecordService extends Service {
             sensorList = sensorManager.getSensorList(Sensor.TYPE_ACCELEROMETER);
         }
         sensorManager.registerListener(sensorEventListener, sensorList.get(0), 1_000_000);
+        Log.d(TAG, "G_THRESHOLD: " + String.valueOf(G_THRESHOLD));
     }
 
     private SensorEventListener sensorEventListener = new SensorEventListener() {
 
         @Override
         public void onSensorChanged(SensorEvent event) {
-            /*for (float i : event.values) {
+            for (float i : event.values) {
                 Log.d(TAG, String.valueOf(i));
             }
             Log.d(TAG, "ol: " + String.valueOf(orientationLocked));
             Log.d(TAG, "da: " + String.valueOf(downAxis));
             Log.d(TAG, "tad: " + String.valueOf(timeAxisDown));
-            Log.d(TAG, "diff: " + String.valueOf(event.timestamp - timeAxisDown));*/
+            Log.d(TAG, "diff: " + String.valueOf(event.timestamp - timeAxisDown));
 
             if (orientationLocked) {
-                if ((downAxis == X_AXIS && abs(event.values[X_AXIS]) < G_THRESHOLD)
-                        || (downAxis == Y_AXIS && abs(event.values[Y_AXIS]) < G_THRESHOLD)) {
+                if ((downAxis == DownAxis.X_POS && event.values[0] < G_THRESHOLD)
+                        || (downAxis == DownAxis.X_NEG && event.values[0] > -G_THRESHOLD)
+                        || (downAxis == DownAxis.Y_POS && event.values[1] < G_THRESHOLD)
+                        || (downAxis == DownAxis.Y_NEG && event.values[1] > -G_THRESHOLD)) {
                     stopRecording();
                     orientationLocked = false;
+                    downAxis = DownAxis.NONE;
                 }
-            }
+            } else {
 
-            if (abs(event.values[X_AXIS]) > G_THRESHOLD) {
-                if (downAxis != X_AXIS) {
-                    downAxis = X_AXIS;
-                    timeAxisDown = event.timestamp;
-                } else if (event.timestamp - timeAxisDown >= (long)1e9) {
-                    orientationLocked = true;
-                }
-            } else if (abs(event.values[Y_AXIS]) > G_THRESHOLD) {
-                if (downAxis != Y_AXIS) {
-                    downAxis = Y_AXIS;
-                    timeAxisDown = event.timestamp;
-                } else if (event.timestamp - timeAxisDown >= (long)1e9) {
-                    orientationLocked = true;
+                if (event.values[0] > G_THRESHOLD) {
+                    if (downAxis != DownAxis.X_POS) {
+                        downAxis = DownAxis.X_POS;
+                        timeAxisDown = event.timestamp;
+                    } else if (event.timestamp - timeAxisDown >= (long) 1e9) {
+                        orientationLocked = true;
+                    }
+                } else if (event.values[0] < -G_THRESHOLD) {
+                    if (downAxis != DownAxis.X_NEG) {
+                        downAxis = DownAxis.X_NEG;
+                        timeAxisDown = event.timestamp;
+                    } else if (event.timestamp - timeAxisDown >= (long) 1e9) {
+                        orientationLocked = true;
+                    }
+                } else if (event.values[1] > G_THRESHOLD) {
+                    if (downAxis != DownAxis.Y_POS) {
+                        downAxis = DownAxis.Y_POS;
+                        timeAxisDown = event.timestamp;
+                    } else if (event.timestamp - timeAxisDown >= (long) 1e9) {
+                        orientationLocked = true;
+                    }
+                } else if (event.values[1] < -G_THRESHOLD) {
+                    if (downAxis != DownAxis.Y_NEG) {
+                        downAxis = DownAxis.Y_NEG;
+                        timeAxisDown = event.timestamp;
+                    } else if (event.timestamp - timeAxisDown >= (long) 1e9) {
+                        orientationLocked = true;
+                    }
                 }
             }
         }
@@ -753,7 +781,7 @@ public class RecordService extends Service {
     }
 
     private void resetOrientation() {
-        downAxis = -1;
+        downAxis = DownAxis.NONE;
         timeAxisDown = 0;
         orientationLocked = false;
     }

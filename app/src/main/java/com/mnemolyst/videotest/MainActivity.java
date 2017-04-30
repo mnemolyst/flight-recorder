@@ -11,6 +11,7 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
+import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
@@ -25,7 +26,7 @@ import android.widget.Button;
     setOrientationHint
  */
 
-public class MainActivity extends Activity {
+public class MainActivity extends AppCompatActivity {
 
     private final static String TAG = "VideoTest";
     private final static int PERM_REQUEST_CAMERA_STORAGE = 1;
