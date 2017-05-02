@@ -1,4 +1,4 @@
-package com.mnemolyst.videotest;
+package com.mnemolyst.flightRecorder;
 
 import android.Manifest;
 import android.app.IntentService;
@@ -293,10 +293,10 @@ public class RecordService extends Service {
         StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
         Size[] codecOutputSizes = map.getOutputSizes(MediaCodec.class);
         for (Size s : codecOutputSizes) {
-            Log.d(TAG, String.valueOf(s.getWidth()) + ", " + String.valueOf(s.getHeight()));
+//            Log.d(TAG, String.valueOf(s.getWidth()) + ", " + String.valueOf(s.getHeight()));
         }
         sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
-        Log.d(TAG, String.valueOf(sensorOrientation));
+//        Log.d(TAG, String.valueOf(sensorOrientation));
 
         MediaFormat format = null;
         for (Size s : codecOutputSizes) {
@@ -414,7 +414,6 @@ public class RecordService extends Service {
             }*/
 
             if (videoBufferList.size() > maxFrames) {
-                Log.d(TAG, "CUT");
 
                 int minVideoIdx = 0;
                 for (int i = videoBufferList.size() - maxFrames; i < videoBufferList.size(); i++) {
@@ -423,11 +422,9 @@ public class RecordService extends Service {
                         break;
                     }
                 }
-                Log.d(TAG, "mvi: " + String.valueOf(minVideoIdx));
 
                 long minVideoId = videoBufferList.get(minVideoIdx).getDataId();
                 long minPresentationTime = videoBufferList.get(minVideoIdx).getBufferInfo().presentationTimeUs;
-                Log.d(TAG, "mpt: " + String.valueOf(minPresentationTime));
                 videoDb.delete(
                         EncodedVideoContract.Schema.TABLE_NAME,
                         EncodedVideoContract.Schema._ID + " < ?",
@@ -436,9 +433,7 @@ public class RecordService extends Service {
 
                 int minAudioIdx = 0;
                 for (int i = 0; i < audioBufferList.size(); i++) {
-                    Log.d(TAG, "audio buffer: " + String.valueOf(i) + " pt: " + String.valueOf(audioBufferList.get(i).getBufferInfo().presentationTimeUs));
                     if (audioBufferList.get(i).getBufferInfo().presentationTimeUs >= minPresentationTime) {
-                        Log.d(TAG, "mai: " + String.valueOf(i));
                         minAudioIdx = i;
                         break;
                     }
@@ -501,8 +496,6 @@ public class RecordService extends Service {
                 return;
             }
 
-            Log.d(TAG, "audio out ts: " + String.valueOf(info.presentationTimeUs));
-
             ByteBuffer outputBuffer = codec.getOutputBuffer(index);
 
             byte[] bufferBytes = new byte[outputBuffer.remaining()];
@@ -560,7 +553,6 @@ public class RecordService extends Service {
 
         @Override
         public void onClosed(@NonNull CameraCaptureSession session) {
-            Log.d(TAG, "Capture session closed");
 
             String state = Environment.getExternalStorageState();
             if (Environment.MEDIA_MOUNTED.equals(state)
@@ -581,7 +573,6 @@ public class RecordService extends Service {
                 mediaMuxer.setOrientationHint(sensorOrientation);
                 mediaMuxer.start();
 
-                Log.d(TAG, "before video");
                 long latestPt = 0;
                 for (BufferDataInfoPair dataInfoPair : videoBufferList) {
 
@@ -592,7 +583,6 @@ public class RecordService extends Service {
                     } else {
                         continue;
                     }
-                    Log.d(TAG, "video ts: " + String.valueOf(info.presentationTimeUs));
 
                     Cursor cursor = videoDb.query(EncodedVideoContract.Schema.TABLE_NAME,
                             null,
@@ -620,7 +610,6 @@ public class RecordService extends Service {
                             " EOS:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM));*/
                 }
 
-                Log.d(TAG, "before audio");
                 latestPt = 0;
                 for (BufferDataInfoPair dataInfoPair : audioBufferList) {
 
@@ -631,7 +620,6 @@ public class RecordService extends Service {
                     } else {
                         continue;
                     }
-                    Log.d(TAG, "audio ts: " + String.valueOf(info.presentationTimeUs));
 
                     Cursor cursor = audioDb.query(EncodedAudioContract.Schema.TABLE_NAME,
                             null,
@@ -651,7 +639,6 @@ public class RecordService extends Service {
 
                     mediaMuxer.writeSampleData(audioTrackIdx, buffer, info);
                 }
-                Log.d(TAG, "after audio");
 
                 mediaMuxer.stop();
                 mediaMuxer.release();
@@ -701,20 +688,19 @@ public class RecordService extends Service {
             sensorList = sensorManager.getSensorList(Sensor.TYPE_ACCELEROMETER);
         }
         sensorManager.registerListener(sensorEventListener, sensorList.get(0), 1_000_000);
-        Log.d(TAG, "G_THRESHOLD: " + String.valueOf(G_THRESHOLD));
     }
 
     private SensorEventListener sensorEventListener = new SensorEventListener() {
 
         @Override
         public void onSensorChanged(SensorEvent event) {
-            for (float i : event.values) {
+            /*for (float i : event.values) {
                 Log.d(TAG, String.valueOf(i));
             }
             Log.d(TAG, "ol: " + String.valueOf(orientationLocked));
             Log.d(TAG, "da: " + String.valueOf(downAxis));
             Log.d(TAG, "tad: " + String.valueOf(timeAxisDown));
-            Log.d(TAG, "diff: " + String.valueOf(event.timestamp - timeAxisDown));
+            Log.d(TAG, "diff: " + String.valueOf(event.timestamp - timeAxisDown));*/
 
             if (orientationLocked) {
                 if ((downAxis == DownAxis.X_POS && event.values[0] < G_THRESHOLD)
@@ -790,7 +776,6 @@ public class RecordService extends Service {
     public void onDestroy() {
 
         videoDb.close();
-        Log.d(TAG, "Destroyed");
     }
 
     RecordState getRecordState() {

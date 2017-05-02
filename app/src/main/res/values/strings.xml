@@ -1,8 +1,15 @@
 <resources>
-    <string name="app_name">Black Box</string>
+    <string name="app_name">Flight Recorder</string>
     <string name="start_button">Record</string>
     <string name="stop_button">Stop</string>
     <string name="title_activity_main">MainActivity</string>
     <string name="notification_title">Black Box</string>
     <string name="notification_message">Recording Video</string>
+
+    <string-array name="list_preference_entries">
+        <item>Entry 1</item>
+        <item>Entry 2</item>
+        <item>Entry 3</item>
+    </string-array>
+
 </resources>

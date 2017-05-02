@@ -1,7 +1,6 @@
-package com.mnemolyst.videotest;
+package com.mnemolyst.flightRecorder;
 
 import android.Manifest;
-import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -28,7 +27,7 @@ import android.widget.Button;
 
 public class MainActivity extends AppCompatActivity {
 
-    private final static String TAG = "VideoTest";
+    private final static String TAG = "FlightRecorder";
     private final static int PERM_REQUEST_CAMERA_STORAGE = 1;
 
     private Button btnRecord;

@@ -1,4 +1,4 @@
-package com.mnemolyst.videotest;
+package com.mnemolyst.flightRecorder;
 
 import org.junit.Test;
 

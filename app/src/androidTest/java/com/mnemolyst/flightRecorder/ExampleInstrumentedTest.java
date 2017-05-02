@@ -1,4 +1,4 @@
-package com.mnemolyst.videotest;
+package com.mnemolyst.flightRecorder;
 
 import android.content.Context;
 import android.support.test.InstrumentationRegistry;
