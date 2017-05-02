@@ -6,10 +6,27 @@
     <string name="notification_title">Black Box</string>
     <string name="notification_message">Recording Video</string>
 
-    <string-array name="list_preference_entries">
-        <item>Entry 1</item>
-        <item>Entry 2</item>
-        <item>Entry 3</item>
+    <!-- Strings related to settings -->
+
+    <string name="pref_duration_title">Recording Duration</string>
+    <string-array name="pref_duration_entries">
+        <item>5 seconds</item>
+        <item>15 seconds</item>
+        <item>30 seconds</item>
+        <item>60 seconds</item>
     </string-array>
+    <string-array name="pref_duration_entry_values">
+        <item>5</item>
+        <item>15</item>
+        <item>30</item>
+        <item>60</item>
+    </string-array>
+
+    <string name="pref_sensitivity_title">Tipover Sensitivity</string>
+    <string-array name="pref_sensitivity_entries">
+        <item>Normal</item>
+        <item>High</item>
+    </string-array>
+    <string name="pref_sensitivity_default">Normal</string>
 
 </resources>

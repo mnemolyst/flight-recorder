@@ -8,12 +8,16 @@ import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.os.IBinder;
+import android.preference.PreferenceFragment;
+import android.preference.PreferenceManager;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
+import android.support.v4.app.FragmentManager;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
+import android.widget.ImageButton;
 
 /**
  * Created by joshua on 4/10/17.
@@ -31,6 +35,7 @@ public class MainActivity extends AppCompatActivity {
     private final static int PERM_REQUEST_CAMERA_STORAGE = 1;
 
     private Button btnRecord;
+    private ImageButton btnSettings;
     private RecordService recordService = null;
 
     private ServiceConnection serviceConnection = new ServiceConnection() {
@@ -89,12 +94,24 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        PreferenceManager.setDefaultValues(this, R.xml.preferences, false);
+
         btnRecord = (Button) findViewById(R.id.btnRecord);
         btnRecord.setOnClickListener(new View.OnClickListener() {
 
             @Override
             public void onClick(View v) {
                 toggleVideoRecord();
+            }
+        });
+
+        btnSettings = (ImageButton) findViewById(R.id.btnPrefs);
+        btnSettings.setOnClickListener(new View.OnClickListener() {
+
+            @Override
+            public void onClick(View v) {
+                Intent intent = new Intent(MainActivity.this, PreferenceActivity.class);
+                startActivity(intent);
             }
         });
 
@@ -148,6 +165,16 @@ public class MainActivity extends AppCompatActivity {
                     Log.d(TAG, "Camera permission denied!");
                 }
             }
+        }
+    }
+
+    public static class SettingsFragment extends PreferenceFragment {
+
+        @Override
+        public void onCreate(Bundle savedInstanceState) {
+
+            super.onCreate(savedInstanceState);
+            addPreferencesFromResource(R.xml.preferences);
         }
     }
 }
