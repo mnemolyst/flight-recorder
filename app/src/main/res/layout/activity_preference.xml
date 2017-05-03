@@ -4,8 +4,8 @@
     android:layout_height="match_parent">
 
     <fragment
-        android:id="@+id/fragment"
-        android:name="com.mnemolyst.flightRecorder.MainActivity$SettingsFragment"
+        android:id="@+id/settingsFragment"
+        android:name="com.mnemolyst.flightRecorder.PreferenceActivity$SettingsFragment"
         android:layout_width="match_parent"
         android:layout_height="wrap_content" />
 </LinearLayout>

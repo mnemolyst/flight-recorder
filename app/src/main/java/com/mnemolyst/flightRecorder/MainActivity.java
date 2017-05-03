@@ -5,6 +5,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.os.IBinder;
@@ -31,7 +32,7 @@ import android.widget.ImageButton;
 
 public class MainActivity extends AppCompatActivity {
 
-    private final static String TAG = "FlightRecorder";
+    final static String TAG = "FlightRecorder";
     private final static int PERM_REQUEST_CAMERA_STORAGE = 1;
 
     private Button btnRecord;
@@ -93,8 +94,6 @@ public class MainActivity extends AppCompatActivity {
 
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-
-        PreferenceManager.setDefaultValues(this, R.xml.preferences, false);
 
         btnRecord = (Button) findViewById(R.id.btnRecord);
         btnRecord.setOnClickListener(new View.OnClickListener() {
@@ -165,16 +164,6 @@ public class MainActivity extends AppCompatActivity {
                     Log.d(TAG, "Camera permission denied!");
                 }
             }
-        }
-    }
-
-    public static class SettingsFragment extends PreferenceFragment {
-
-        @Override
-        public void onCreate(Bundle savedInstanceState) {
-
-            super.onCreate(savedInstanceState);
-            addPreferencesFromResource(R.xml.preferences);
         }
     }
 }

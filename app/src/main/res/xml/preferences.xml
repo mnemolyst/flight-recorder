@@ -1,17 +1,45 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
-
     <ListPreference
-        android:defaultValue="30"
+        android:defaultValue="15"
         android:entries="@array/pref_duration_entries"
         android:entryValues="@array/pref_duration_entry_values"
         android:key="pref_duration"
         android:title="@string/pref_duration_title" />
-
+    <ListPreference
+        android:defaultValue="@string/pref_video_quality_default"
+        android:entries="@array/pref_video_quality_entries"
+        android:entryValues="@array/pref_video_quality_entries"
+        android:key="pref_video_quality"
+        android:title="@string/pref_video_quality_title" />
+    <CheckBoxPreference
+        android:defaultValue="true"
+        android:key="pref_tipover"
+        android:title="@string/pref_save_on_tipover_title" />
     <ListPreference
         android:defaultValue="@string/pref_sensitivity_default"
+        android:dependency="pref_tipover"
         android:entries="@array/pref_sensitivity_entries"
-        android:entryValues="@array/pref_sensitivity_entries"
+        android:entryValues="@array/pref_sensitivity_entry_values"
         android:key="pref_sensitivity"
         android:title="@string/pref_sensitivity_title" />
+    <ListPreference
+        android:defaultValue="0"
+        android:dependency="pref_tipover"
+        android:entries="@array/pref_post_tipover_entries"
+        android:entryValues="@array/pref_post_tipover_entry_values"
+        android:key="pref_post_tipover_duration"
+        android:title="@string/pref_post_tipover_title" />
+    <CheckBoxPreference
+        android:defaultValue="true"
+        android:key="pref_audio"
+        android:title="@string/pref_audio_title" />
+    <CheckBoxPreference
+        android:defaultValue="false"
+        android:key="pref_location"
+        android:title="@string/pref_location_title" />
+    <CheckBoxPreference
+        android:defaultValue="false"
+        android:key="pref_backup"
+        android:title="@string/pref_backup_title" />
 </PreferenceScreen>

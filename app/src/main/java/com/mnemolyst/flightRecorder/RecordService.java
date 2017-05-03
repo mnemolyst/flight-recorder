@@ -90,11 +90,13 @@ public class RecordService extends Service {
     private int audioChunkBytes = audioSampleRate * 2 / 24;
     private long calPtDiff = -1;
 
+    private boolean saveLocation = false;
+
     private SQLiteOpenHelper videoSqlHelper;
     private SQLiteDatabase videoDb = null;
     private SQLiteOpenHelper audioSqlHelper;
     private SQLiteDatabase audioDb = null;
-    private int maxFrames = 30 * 30;
+    private static int recordDuration = 15;
     private Integer sensorOrientation = 0;
 
     // Gravity sensor event listener variables
@@ -305,7 +307,7 @@ public class RecordService extends Service {
                 format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
                 format.setInteger(MediaFormat.KEY_BIT_RATE, 5000000);
                 format.setString(MediaFormat.KEY_FRAME_RATE, null);
-                format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
+                format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 0);
                 break;
             }
         }
@@ -413,11 +415,20 @@ public class RecordService extends Service {
                 Log.d(TAG, "audio del: " + String.valueOf(audioBufferList.get(audioBufferList.size() - 1).getBufferInfo().presentationTimeUs - audioBufferList.get(0).getBufferInfo().presentationTimeUs));
             }*/
 
-            if (videoBufferList.size() > maxFrames) {
+            long duration = 0;
+            if (videoBufferList.size() >= 2) {
+                duration = ( videoBufferList.get(videoBufferList.size() - 1).getBufferInfo().presentationTimeUs
+                        - videoBufferList.get(0).getBufferInfo().presentationTimeUs ) / 1_000_000;
+            }
 
+            if (duration > recordDuration) {
+
+                long minVideoTs = videoBufferList.get(videoBufferList.size() - 1).getBufferInfo().presentationTimeUs - recordDuration * 1_000_000;
                 int minVideoIdx = 0;
-                for (int i = videoBufferList.size() - maxFrames; i < videoBufferList.size(); i++) {
-                    if ((videoBufferList.get(i).getBufferInfo().flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) == MediaCodec.BUFFER_FLAG_KEY_FRAME) {
+                for (int i = 0; i < videoBufferList.size(); i++) {
+                    BufferDataInfoPair pair = videoBufferList.get(i);
+                    if ((pair.getBufferInfo().presentationTimeUs > minVideoTs) &&
+                            (pair.getBufferInfo().flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) == MediaCodec.BUFFER_FLAG_KEY_FRAME) {
                         minVideoIdx = i;
                         break;
                     }
@@ -800,5 +811,10 @@ public class RecordService extends Service {
 
             recordState = RecordState.STOPPING;
         }
+    }
+
+    public static void setRecordDuration(int recordDuration) {
+        Log.d(TAG, "set duration: " + String.valueOf(recordDuration));
+        RecordService.recordDuration = recordDuration;
     }
 }

@@ -8,7 +8,7 @@
 
     <!-- Strings related to settings -->
 
-    <string name="pref_duration_title">Recording Duration</string>
+    <string name="pref_duration_title">Record duration</string>
     <string-array name="pref_duration_entries">
         <item>5 seconds</item>
         <item>15 seconds</item>
@@ -22,11 +22,42 @@
         <item>60</item>
     </string-array>
 
-    <string name="pref_sensitivity_title">Tipover Sensitivity</string>
+    <string name="pref_video_quality_title">Video quality</string>
+    <string-array name="pref_video_quality_entries">
+        <item>1080p</item>
+        <item>720p</item>
+    </string-array>
+    <string name="pref_video_quality_default">1080p</string>
+
+    <string name="pref_save_on_tipover_title">Stop recording on tipover</string>
+
+    <string name="pref_sensitivity_title">Tipover sensitivity</string>
     <string-array name="pref_sensitivity_entries">
+        <item>Normal (45 &#x00B0;)</item>
+        <item>High (60 &#x00B0;)</item>
+    </string-array>
+    <string-array name="pref_sensitivity_entry_values">
         <item>Normal</item>
         <item>High</item>
     </string-array>
     <string name="pref_sensitivity_default">Normal</string>
+
+    <string name="pref_post_tipover_title">Record duration after tipover</string>
+    <string-array name="pref_post_tipover_entries">
+        <item>Nothing</item>
+        <item>5 seconds</item>
+        <item>15 seconds</item>
+    </string-array>
+    <string-array name="pref_post_tipover_entry_values">
+        <item>0</item>
+        <item>5</item>
+        <item>15</item>
+    </string-array>
+
+    <string name="pref_audio_title">Record audio</string>
+
+    <string name="pref_location_title">Save location</string>
+
+    <string name="pref_backup_title">Backup to Google Drive</string>
 
 </resources>
