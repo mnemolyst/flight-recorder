@@ -267,6 +267,12 @@ public class RecordService extends Service {
 
     private void prepareForRecording() {
 
+        videoFormat = null;
+        audioFormat = null;
+
+        videoBufferList = new ArrayList<>();
+        audioBufferList = new ArrayList<>();
+
         videoDb.delete(EncodedVideoContract.Schema.TABLE_NAME, null, null);
         audioDb.delete(EncodedAudioContract.Schema.TABLE_NAME, null, null);
 
@@ -383,17 +389,15 @@ public class RecordService extends Service {
         @Override
         public void onOutputBufferAvailable(@NonNull MediaCodec codec, int index, @NonNull MediaCodec.BufferInfo info) {
 
-            Log.d(TAG, "videoCoded output");
+            if ((info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == MediaCodec.BUFFER_FLAG_CODEC_CONFIG) {
+                return;
+            }
 
             if (recordState == RecordState.STARTING) {
 
                 recordState = RecordState.STARTED;
                 calPtDiff = info.presentationTimeUs - Calendar.getInstance().getTimeInMillis() * 1000;
                 audioCodec.start();
-            }
-
-            if ((info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == MediaCodec.BUFFER_FLAG_CODEC_CONFIG) {
-                return;
             }
 
             // Once video capture begins, start audio capture.
@@ -410,6 +414,8 @@ public class RecordService extends Service {
             BufferDataInfoPair dataInfoPair = new BufferDataInfoPair(insertedId, info);
             videoBufferList.add(dataInfoPair);
 
+            codec.releaseOutputBuffer(index, false);
+
 //            Log.d(TAG, "Frames: " + String.valueOf(videoBufferList.size()));
 
             /*if (audioBufferList.size() > 0) {
@@ -421,6 +427,7 @@ public class RecordService extends Service {
                 Log.d(TAG, "audio del: " + String.valueOf(audioBufferList.get(audioBufferList.size() - 1).getBufferInfo().presentationTimeUs - audioBufferList.get(0).getBufferInfo().presentationTimeUs));
             }*/
 
+            // Discard old buffers
             long duration = 0;
             if (videoBufferList.size() >= 2) {
                 duration = videoBufferList.get(videoBufferList.size() - 1).getBufferInfo().presentationTimeUs
@@ -432,9 +439,11 @@ public class RecordService extends Service {
                 long minVideoTs = videoBufferList.get(videoBufferList.size() - 1).getBufferInfo().presentationTimeUs - recordDuration;
                 int minVideoIdx = 0;
                 for (int i = 0; i < videoBufferList.size(); i++) {
+
                     BufferDataInfoPair pair = videoBufferList.get(i);
-                    if ((pair.getBufferInfo().presentationTimeUs > minVideoTs) &&
-                            (pair.getBufferInfo().flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) == MediaCodec.BUFFER_FLAG_KEY_FRAME) {
+
+                    if ((pair.getBufferInfo().presentationTimeUs > minVideoTs)
+                            && ((pair.getBufferInfo().flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) == MediaCodec.BUFFER_FLAG_KEY_FRAME)) {
                         minVideoIdx = i;
                         break;
                     }
@@ -467,7 +476,6 @@ public class RecordService extends Service {
                 audioBufferList.subList(0, minAudioIdx).clear();
             }
 
-            codec.releaseOutputBuffer(index, false);
 
             if ((info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) == MediaCodec.BUFFER_FLAG_END_OF_STREAM) {
                 Log.d(TAG, "videoCodec EOS");
@@ -579,36 +587,7 @@ public class RecordService extends Service {
 
             Log.d(TAG, "session.onClosed");
 
-            dumpBuffersToFile();
-
-            videoBufferList = new ArrayList<>();
-            videoFormat = null;
-
-            audioBufferList = new ArrayList<>();
-            audioFormat = null;
-
-            videoCodec.stop();
-            videoCodec.release();
-            videoInputSurface.release();
-
-            audioCodec.stop();
-            audioCodec.release();
-
-            calPtDiff = -1;
-
-            recordState = RecordState.STOPPED;
-
-            cameraDevice.close();
-
-            SensorManager sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
-            sensorManager.unregisterListener(sensorEventListener);
-            resetOrientation();
-
-            stopForeground(true);
-
-            if (onStopRecordCallback != null) {
-                onStopRecordCallback.onStopRecord();
-            }
+            recordingStopped();
         }
     };
 
@@ -718,27 +697,42 @@ public class RecordService extends Service {
 
         if (recordState.equals(RecordState.STARTED)) {
 
-            try {
-                captureSession.abortCaptures();
-                captureSession.close();
-
-                audioRecord.stop();
-                audioRecord.release();
-            } catch (CameraAccessException e) {
-                e.printStackTrace();
-            } catch (IllegalStateException e) {
-                e.printStackTrace();
-            }
+            recordState = RecordState.STOPPING;
 
             videoCodec.signalEndOfInputStream();
 
-            recordState = RecordState.STOPPING;
+            try {
+                captureSession.abortCaptures();
+                captureSession.close();
+            } catch (CameraAccessException | IllegalStateException e) {
+                e.printStackTrace();
+                recordingStopped();
+            }
+
+            audioRecord.stop();
+            audioRecord.release();
         }
     }
 
-    void dumpBuffersToFile() {
+    void recordingStopped() {
+
+        boolean saved = dumpBuffersToFile();
+
+        cleanUp();
+
+        recordState = RecordState.STOPPED;
+
+        stopForeground(true);
+
+        if (onStopRecordCallback != null) {
+            onStopRecordCallback.onStopRecord();
+        }
+    }
+
+    boolean dumpBuffersToFile() {
 
         String state = Environment.getExternalStorageState();
+
         if (Environment.MEDIA_MOUNTED.equals(state)
                 && ActivityCompat.checkSelfPermission(RecordService.this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
 
@@ -826,9 +820,29 @@ public class RecordService extends Service {
 
             mediaMuxer.stop();
             mediaMuxer.release();
+
+            return true;
         } else {
             Log.e(TAG, "External media unavailable: " + state);
+
+            return false;
         }
+    }
+
+    private void cleanUp() {
+
+        videoCodec.stop();
+        videoCodec.release();
+        videoInputSurface.release();
+
+        audioCodec.stop();
+        audioCodec.release();
+
+        cameraDevice.close();
+
+        SensorManager sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        sensorManager.unregisterListener(sensorEventListener);
+        resetOrientation();
     }
 
     public static void setRecordDuration(int recordDuration) {
