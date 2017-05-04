@@ -22,9 +22,9 @@ import java.util.List;
 public class PreferenceActivity extends Activity implements SharedPreferences.OnSharedPreferenceChangeListener {
 
     private static final String TAG = "PreferenceActivity";
-    private static final String KEY_PREF_DURATION = "pref_duration";
-    private static final String KEY_PREF_VIDEO_QUALITY = "pref_video_quality";
-    private static final String KEY_PREF_LOCATION = "pref_location";
+    static final String KEY_PREF_DURATION = "pref_duration";
+    static final String KEY_PREF_VIDEO_QUALITY = "pref_video_quality";
+    static final String KEY_PREF_LOCATION = "pref_location";
     private static final int PERM_REQUEST_LOCATION = 2;
     private SettingsFragment settingsFragment;
 
@@ -43,8 +43,10 @@ public class PreferenceActivity extends Activity implements SharedPreferences.On
 
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_preference);
-        settingsFragment = (SettingsFragment) getFragmentManager().findFragmentById(R.id.settingsFragment);
+
         PreferenceManager.setDefaultValues(this, R.xml.preferences, false);
+
+        settingsFragment = (SettingsFragment) getFragmentManager().findFragmentById(R.id.settingsFragment);
         initSummary(settingsFragment.getPreferenceScreen());
     }
 
@@ -90,6 +92,14 @@ public class PreferenceActivity extends Activity implements SharedPreferences.On
                 RecordService.setRecordDuration(Integer.valueOf(sharedPreferences.getString(key, "15")));
                 break;
             case KEY_PREF_VIDEO_QUALITY:
+                String q1080p = getResources().getString(R.string.pref_video_quality_1080p);
+                String q720p = getResources().getString(R.string.pref_video_quality_720p);
+                String qDefault = getResources().getString(R.string.pref_video_quality_default);
+                if (sharedPreferences.getString(key, qDefault).equals(q1080p)) {
+                    RecordService.setVideoQuality(RecordService.VideoQuality.HIGH_1080P);
+                } else if (sharedPreferences.getString(key, qDefault).equals(q720p)) {
+                    RecordService.setVideoQuality(RecordService.VideoQuality.MED_720P);
+                }
                 break;
             case KEY_PREF_LOCATION:
                 if (sharedPreferences.getBoolean(key, true)

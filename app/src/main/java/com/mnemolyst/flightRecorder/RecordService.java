@@ -8,6 +8,7 @@ import android.app.Service;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
@@ -35,6 +36,7 @@ import android.media.MediaRecorder;
 import android.os.Binder;
 import android.os.Environment;
 import android.os.IBinder;
+import android.preference.PreferenceManager;
 import android.provider.BaseColumns;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
@@ -72,11 +74,18 @@ public class RecordService extends Service {
     enum DownAxis {
         NONE, X_POS, X_NEG, Y_POS, Y_NEG
     }
+    enum VideoQuality {
+        HIGH_1080P, MED_720P
+    }
     private RecordState recordState;
     private DownAxis downAxis = DownAxis.NONE;
+    private static VideoQuality videoQuality;
+    private String cameraId = "0";
     private CameraDevice cameraDevice;
     private CaptureRequest.Builder captureRequestBuilder;
     private CameraCaptureSession captureSession;
+    private boolean videoSize1080pAvailable = false;
+    private boolean videoSize720pAvailable = false;
     private MediaCodec videoCodec;
     private Surface videoInputSurface;
     private MediaCodec audioCodec;
@@ -237,7 +246,6 @@ public class RecordService extends Service {
         CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
 
         try {
-            String cameraId = cameraManager.getCameraIdList()[0];
             cameraManager.openCamera(cameraId, new CameraDevice.StateCallback() {
 
                 @Override
@@ -309,21 +317,21 @@ public class RecordService extends Service {
 //        Log.d(TAG, String.valueOf(sensorOrientation));
 
         MediaFormat format = null;
-        for (Size s : codecOutputSizes) {
-            if (s.getHeight() == 720) {
-                format = MediaFormat.createVideoFormat("video/avc", s.getWidth(), s.getHeight());
-                format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
-                format.setInteger(MediaFormat.KEY_BIT_RATE, 5000000);
-                format.setString(MediaFormat.KEY_FRAME_RATE, null);
-                format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 0);
-                break;
-            }
+        if (videoQuality == VideoQuality.HIGH_1080P) {
+            format = MediaFormat.createVideoFormat("video/avc", 1920, 1080);
+        } else if (videoQuality == VideoQuality.MED_720P) {
+            format = MediaFormat.createVideoFormat("video/avc", 1280, 720);
         }
 
         if (format == null) {
-            Log.e(TAG, "No suitable MediaFormat resolution found.");
+            Log.e(TAG, "No suitable video resolution found.");
             return;
         }
+
+        format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
+        format.setInteger(MediaFormat.KEY_BIT_RATE, 5000000);
+        format.setString(MediaFormat.KEY_FRAME_RATE, null);
+        format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 0);
 
         MediaCodecList codecList = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
         String codecName = codecList.findEncoderForFormat(format);
@@ -403,6 +411,10 @@ public class RecordService extends Service {
             // Once video capture begins, start audio capture.
 
             ByteBuffer outputBuffer = codec.getOutputBuffer(index);
+
+            if (outputBuffer == null) {
+                return;
+            }
 
             byte[] bufferBytes = new byte[outputBuffer.remaining()];
             outputBuffer.get(bufferBytes);
@@ -508,8 +520,12 @@ public class RecordService extends Service {
                 case STARTING:
                     break;
                 case STARTED:
-                    ByteBuffer buffer = codec.getInputBuffer(index);
-                    int size = audioRecord.read(buffer, audioChunkBytes);
+                    ByteBuffer inputBuffer = codec.getInputBuffer(index);
+
+                    if (inputBuffer == null) {
+                        return;
+                    }
+                    int size = audioRecord.read(inputBuffer, audioChunkBytes);
                     long presentationTime = Calendar.getInstance().getTimeInMillis() * 1000 + calPtDiff;
                     codec.queueInputBuffer(index, 0, size, presentationTime, 0);
                     break;
@@ -528,6 +544,10 @@ public class RecordService extends Service {
             }
 
             ByteBuffer outputBuffer = codec.getOutputBuffer(index);
+
+            if (outputBuffer == null) {
+                return;
+            }
 
             byte[] bufferBytes = new byte[outputBuffer.remaining()];
             outputBuffer.get(bufferBytes);
@@ -687,6 +707,7 @@ public class RecordService extends Service {
     public void onDestroy() {
 
         videoDb.close();
+        audioDb.close();
     }
 
     RecordState getRecordState() {
@@ -745,6 +766,11 @@ public class RecordService extends Service {
             } catch (IOException e) {
                 e.printStackTrace();
             }
+
+            if (mediaMuxer == null) {
+                return false;
+            }
+
             int videoTrackIdx = mediaMuxer.addTrack(videoFormat);
             int audioTrackIdx = mediaMuxer.addTrack(audioFormat);
 
@@ -846,7 +872,14 @@ public class RecordService extends Service {
     }
 
     public static void setRecordDuration(int recordDuration) {
-        Log.d(TAG, "set duration: " + String.valueOf(recordDuration));
         RecordService.recordDuration = recordDuration * 1_000_000;
+    }
+
+    public static void setVideoQuality(VideoQuality videoQuality) {
+        RecordService.videoQuality = videoQuality;
+    }
+
+    public void setCameraId(String cameraId) {
+        this.cameraId = cameraId;
     }
 }

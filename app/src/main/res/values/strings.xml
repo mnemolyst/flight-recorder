@@ -23,11 +23,13 @@
     </string-array>
 
     <string name="pref_video_quality_title">Video quality</string>
+    <string name="pref_video_quality_1080p">1080p</string>
+    <string name="pref_video_quality_720p">720p</string>
     <string-array name="pref_video_quality_entries">
-        <item>1080p</item>
-        <item>720p</item>
+        <item>@string/pref_video_quality_1080p</item>
+        <item>@string/pref_video_quality_720p</item>
     </string-array>
-    <string name="pref_video_quality_default">1080p</string>
+    <string name="pref_video_quality_default">@string/pref_video_quality_1080p</string>
 
     <string name="pref_save_on_tipover_title">Stop recording on tipover</string>
 

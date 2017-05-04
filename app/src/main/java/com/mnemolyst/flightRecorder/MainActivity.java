@@ -7,8 +7,14 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.hardware.camera2.CameraAccessException;
+import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CameraManager;
+import android.hardware.camera2.params.StreamConfigurationMap;
+import android.media.MediaCodec;
 import android.os.Bundle;
 import android.os.IBinder;
+import android.preference.ListPreference;
 import android.preference.PreferenceFragment;
 import android.preference.PreferenceManager;
 import android.support.annotation.NonNull;
@@ -16,9 +22,12 @@ import android.support.v4.app.ActivityCompat;
 import android.support.v4.app.FragmentManager;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
+import android.util.Size;
 import android.view.View;
 import android.widget.Button;
 import android.widget.ImageButton;
+
+import java.util.ArrayList;
 
 /**
  * Created by joshua on 4/10/17.
@@ -38,6 +47,7 @@ public class MainActivity extends AppCompatActivity {
     private Button btnRecord;
     private ImageButton btnSettings;
     private RecordService recordService = null;
+    private ArrayList<String> availableVideoQualities = new ArrayList<>();
 
     private ServiceConnection serviceConnection = new ServiceConnection() {
 
@@ -47,6 +57,47 @@ public class MainActivity extends AppCompatActivity {
             RecordService.RecordServiceBinder binder = (RecordService.RecordServiceBinder) service;
             recordService = binder.getService();
             recordService.registerOnStopRecordCallback(onStopRecordCallback);
+
+            // Get available output resolutions
+            CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+
+            try {
+                String[] cameraIdList = cameraManager.getCameraIdList();
+                for (String id : cameraIdList) {
+
+                    CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(id);
+                    if (characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK) {
+
+                        recordService.setCameraId(id);
+                        /*StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+                        Size[] outputSizes = map.getOutputSizes(MediaCodec.class);
+
+                        availableVideoQualities = new ArrayList<>();
+                        for (Size s : outputSizes) {
+                            if (s.getWidth() == 1920 && s.getHeight() == 1080) {
+                                availableVideoQualities.add(getResources().getString(R.string.pref_video_quality_1080p));
+                            } else if (s.getWidth() == 1280 && s.getHeight() == 720) {
+                                availableVideoQualities.add(getResources().getString(R.string.pref_video_quality_720p));
+                            }
+                        }*/
+
+                        break;
+                    }
+                }
+            } catch (CameraAccessException e) {
+                e.printStackTrace();
+            }
+
+            SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(MainActivity.this);
+
+            String q1080p = getResources().getString(R.string.pref_video_quality_1080p);
+            String q720p = getResources().getString(R.string.pref_video_quality_720p);
+            String qDefault = getResources().getString(R.string.pref_video_quality_default);
+            if (sharedPreferences.getString(PreferenceActivity.KEY_PREF_VIDEO_QUALITY, qDefault).equals(q1080p)) {
+                RecordService.setVideoQuality(RecordService.VideoQuality.HIGH_1080P);
+            } else if (sharedPreferences.getString(PreferenceActivity.KEY_PREF_VIDEO_QUALITY, qDefault).equals(q720p)) {
+                RecordService.setVideoQuality(RecordService.VideoQuality.MED_720P);
+            }
         }
 
         @Override
