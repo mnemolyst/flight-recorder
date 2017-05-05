@@ -8,7 +8,6 @@ import android.app.Service;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
@@ -36,7 +35,6 @@ import android.media.MediaRecorder;
 import android.os.Binder;
 import android.os.Environment;
 import android.os.IBinder;
-import android.preference.PreferenceManager;
 import android.provider.BaseColumns;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
@@ -77,9 +75,13 @@ public class RecordService extends Service {
     enum VideoQuality {
         HIGH_1080P, MED_720P
     }
+    enum TipoverThreshold {
+        NORMAL, HIGH
+    }
     private RecordState recordState;
     private DownAxis downAxis = DownAxis.NONE;
     private static VideoQuality videoQuality;
+    private static TipoverThreshold tipoverThreshold;
     private String cameraId = "0";
     private CameraDevice cameraDevice;
     private CaptureRequest.Builder captureRequestBuilder;
@@ -99,7 +101,9 @@ public class RecordService extends Service {
     private int audioChunkBytes = audioSampleRate * 2 / 24;
     private long calPtDiff = -1;
 
-    private boolean saveLocation = false;
+    private static boolean saveOnTipover = true;
+    private static boolean recordAudio = true;
+    private static boolean saveLocation = false;
 
     private SQLiteOpenHelper videoSqlHelper;
     private SQLiteDatabase videoDb = null;
@@ -109,17 +113,24 @@ public class RecordService extends Service {
     private Integer sensorOrientation = 0;
 
     // Gravity sensor event listener variables
-    private final double G_THRESHOLD = SensorManager.GRAVITY_EARTH * sin(PI / 6);
+    private final double G_THRESHOLD_NORMAL = SensorManager.GRAVITY_EARTH * sin(PI / 4);
+    private final double G_THRESHOLD_HIGH = SensorManager.GRAVITY_EARTH * sin(PI / 6);
+    private final long TIME_THRESHOLD = (long) 2e9; // 2 seconds
     private long timeAxisDown = 0;
+    private long timeTipped = 0;
     private boolean orientationLocked = false;
 
     private RecordServiceBinder binder = new RecordServiceBinder();
 
     private OnStopRecordCallback onStopRecordCallback = null;
+    private OnOrientationLockedCallback onOrientationLockedCallback = null;
 
     static abstract class OnStopRecordCallback {
-
         abstract void onStopRecord();
+    }
+
+    static abstract class OnOrientationLockedCallback {
+        abstract void onOrientationLocked();
     }
 
     class RecordServiceBinder extends Binder {
@@ -216,6 +227,8 @@ public class RecordService extends Service {
 
         recordState = RecordState.STOPPED;
 
+        MainActivity.googleApiClient.connect();
+
         videoSqlHelper = new EncodedVideoHelper(this);
         videoDb = videoSqlHelper.getWritableDatabase();
 
@@ -228,13 +241,24 @@ public class RecordService extends Service {
     @Override
     public boolean onUnbind(Intent intent) {
 
+        Log.d(TAG, "onUnbind");
         stopRecording();
+        MainActivity.googleApiClient.disconnect();
+
+        videoDb.close();
+        audioDb.close();
+
         return false;
     }
 
     public void registerOnStopRecordCallback(OnStopRecordCallback callback) {
 
         onStopRecordCallback = callback;
+    }
+
+    public void registerOnOrientationLockedCallback(OnOrientationLockedCallback callback) {
+
+        onOrientationLockedCallback = callback;
     }
 
     private void openCamera() {
@@ -625,6 +649,7 @@ public class RecordService extends Service {
 
         @Override
         public void onSensorChanged(SensorEvent event) {
+
             /*for (float i : event.values) {
                 Log.d(TAG, String.valueOf(i));
             }
@@ -633,45 +658,68 @@ public class RecordService extends Service {
             Log.d(TAG, "tad: " + String.valueOf(timeAxisDown));
             Log.d(TAG, "diff: " + String.valueOf(event.timestamp - timeAxisDown));*/
 
+            double gThreshold;
+            if (tipoverThreshold.equals(TipoverThreshold.NORMAL)) {
+                gThreshold = G_THRESHOLD_NORMAL;
+            } else {
+                gThreshold = G_THRESHOLD_HIGH;
+            }
+
             if (orientationLocked) {
-                if ((downAxis == DownAxis.X_POS && event.values[0] < G_THRESHOLD)
-                        || (downAxis == DownAxis.X_NEG && event.values[0] > -G_THRESHOLD)
-                        || (downAxis == DownAxis.Y_POS && event.values[1] < G_THRESHOLD)
-                        || (downAxis == DownAxis.Y_NEG && event.values[1] > -G_THRESHOLD)) {
-                    stopRecording();
-                    orientationLocked = false;
-                    downAxis = DownAxis.NONE;
+
+                if ((downAxis == DownAxis.X_POS && event.values[0] < gThreshold)
+                        || (downAxis == DownAxis.X_NEG && event.values[0] > -gThreshold)
+                        || (downAxis == DownAxis.Y_POS && event.values[1] < gThreshold)
+                        || (downAxis == DownAxis.Y_NEG && event.values[1] > -gThreshold)) {
+
+                    if (event.timestamp - timeTipped >= TIME_THRESHOLD) {
+
+                        if (saveOnTipover) {
+                            stopRecording();
+                        }
+                        orientationLocked = false;
+                        downAxis = DownAxis.NONE;
+                    }
+                } else {
+                    timeTipped = event.timestamp;
                 }
             } else {
 
-                if (event.values[0] > G_THRESHOLD) {
-                    if (downAxis != DownAxis.X_POS) {
+                boolean checkForLock = false;
+
+                if (event.values[0] > gThreshold) {
+                    if (downAxis == DownAxis.X_POS) {
+                        checkForLock = true;
+                    } else {
                         downAxis = DownAxis.X_POS;
                         timeAxisDown = event.timestamp;
-                    } else if (event.timestamp - timeAxisDown >= (long) 1e9) {
-                        orientationLocked = true;
                     }
-                } else if (event.values[0] < -G_THRESHOLD) {
-                    if (downAxis != DownAxis.X_NEG) {
+                } else if (event.values[0] < -gThreshold) {
+                    if (downAxis == DownAxis.X_NEG) {
+                        checkForLock = true;
+                    } else {
                         downAxis = DownAxis.X_NEG;
                         timeAxisDown = event.timestamp;
-                    } else if (event.timestamp - timeAxisDown >= (long) 1e9) {
-                        orientationLocked = true;
                     }
-                } else if (event.values[1] > G_THRESHOLD) {
-                    if (downAxis != DownAxis.Y_POS) {
+                } else if (event.values[1] > gThreshold) {
+                    if (downAxis == DownAxis.Y_POS) {
+                        checkForLock = true;
+                    } else {
                         downAxis = DownAxis.Y_POS;
                         timeAxisDown = event.timestamp;
-                    } else if (event.timestamp - timeAxisDown >= (long) 1e9) {
-                        orientationLocked = true;
                     }
-                } else if (event.values[1] < -G_THRESHOLD) {
-                    if (downAxis != DownAxis.Y_NEG) {
+                } else if (event.values[1] < -gThreshold) {
+                    if (downAxis == DownAxis.Y_NEG) {
+                        checkForLock = true;
+                    } else {
                         downAxis = DownAxis.Y_NEG;
                         timeAxisDown = event.timestamp;
-                    } else if (event.timestamp - timeAxisDown >= (long) 1e9) {
-                        orientationLocked = true;
                     }
+                }
+
+                if (checkForLock && event.timestamp - timeAxisDown >= TIME_THRESHOLD) {
+                    orientationLocked = true;
+                    onOrientationLockedCallback.onOrientationLocked();
                 }
             }
         }
@@ -700,14 +748,13 @@ public class RecordService extends Service {
     private void resetOrientation() {
         downAxis = DownAxis.NONE;
         timeAxisDown = 0;
+        timeTipped = 0;
         orientationLocked = false;
     }
 
     @Override
     public void onDestroy() {
 
-        videoDb.close();
-        audioDb.close();
     }
 
     RecordState getRecordState() {
@@ -736,6 +783,7 @@ public class RecordService extends Service {
     }
 
     void recordingStopped() {
+
 
         boolean saved = dumpBuffersToFile();
 
@@ -772,7 +820,11 @@ public class RecordService extends Service {
             }
 
             int videoTrackIdx = mediaMuxer.addTrack(videoFormat);
-            int audioTrackIdx = mediaMuxer.addTrack(audioFormat);
+
+            int audioTrackIdx = -1;
+            if (recordAudio) {
+                audioTrackIdx = mediaMuxer.addTrack(audioFormat);
+            }
 
             mediaMuxer.setOrientationHint(sensorOrientation);
             mediaMuxer.start();
@@ -814,34 +866,37 @@ public class RecordService extends Service {
                         " EOS:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM));*/
             }
 
-            latestPt = 0;
-            for (BufferDataInfoPair dataInfoPair : audioBufferList) {
+            if (recordAudio) {
 
-                long bufferId = dataInfoPair.getDataId();
-                MediaCodec.BufferInfo info = dataInfoPair.getBufferInfo();
-                if (info.presentationTimeUs > latestPt) {
-                    latestPt = info.presentationTimeUs;
-                } else {
-                    continue;
+                latestPt = 0;
+                for (BufferDataInfoPair dataInfoPair : audioBufferList) {
+
+                    long bufferId = dataInfoPair.getDataId();
+                    MediaCodec.BufferInfo info = dataInfoPair.getBufferInfo();
+                    if (info.presentationTimeUs > latestPt) {
+                        latestPt = info.presentationTimeUs;
+                    } else {
+                        continue;
+                    }
+
+                    Cursor cursor = audioDb.query(EncodedAudioContract.Schema.TABLE_NAME,
+                            null,
+                            EncodedAudioContract.Schema._ID + " = " + String.valueOf(bufferId),
+                            null, null, null,
+                            EncodedAudioContract.Schema._ID + " ASC");
+
+                    if (!cursor.moveToFirst()) {
+                        continue;
+                    }
+
+                    ByteBuffer buffer = ByteBuffer.wrap(cursor.getBlob(
+                            cursor.getColumnIndex(EncodedAudioContract.Schema.AUDIO_DATA_COLUMN_NAME)
+                    ));
+
+                    cursor.close();
+
+                    mediaMuxer.writeSampleData(audioTrackIdx, buffer, info);
                 }
-
-                Cursor cursor = audioDb.query(EncodedAudioContract.Schema.TABLE_NAME,
-                        null,
-                        EncodedAudioContract.Schema._ID + " = " + String.valueOf(bufferId),
-                        null, null, null,
-                        EncodedAudioContract.Schema._ID + " ASC");
-
-                if (! cursor.moveToFirst()) {
-                    continue;
-                }
-
-                ByteBuffer buffer = ByteBuffer.wrap(cursor.getBlob(
-                        cursor.getColumnIndex(EncodedAudioContract.Schema.AUDIO_DATA_COLUMN_NAME)
-                ));
-
-                cursor.close();
-
-                mediaMuxer.writeSampleData(audioTrackIdx, buffer, info);
             }
 
             mediaMuxer.stop();
@@ -872,11 +927,41 @@ public class RecordService extends Service {
     }
 
     public static void setRecordDuration(int recordDuration) {
+        Log.d(TAG, "setRecordDuration: " + String.valueOf(recordDuration));
         RecordService.recordDuration = recordDuration * 1_000_000;
     }
 
-    public static void setVideoQuality(VideoQuality videoQuality) {
-        RecordService.videoQuality = videoQuality;
+    public static void setVideoQuality(String pref, String q1080p, String q720p) {
+        Log.d(TAG, "setVideoQuality: " + pref);
+        if (pref.equals(q1080p)) {
+            RecordService.videoQuality = VideoQuality.HIGH_1080P;
+        } else if (pref.equals(q720p)) {
+            RecordService.videoQuality = VideoQuality.MED_720P;
+        }
+    }
+
+    public static void setSaveOnTipover(boolean saveOnTipover) {
+        Log.d(TAG, "setSaveOnTipover: " + String.valueOf(saveOnTipover));
+        RecordService.saveOnTipover = saveOnTipover;
+    }
+
+    public static void setTipoverThreshold(String pref, String normal, String high) {
+        Log.d(TAG, "setTipoverThreshold: " + pref);
+        if (pref.equals(normal)) {
+            RecordService.tipoverThreshold = TipoverThreshold.NORMAL;
+        } else if (pref.equals(high)) {
+            RecordService.tipoverThreshold = TipoverThreshold.HIGH;
+        }
+    }
+
+    public static void setRecordAudio(boolean recordAudio) {
+        Log.d(TAG, "setRecordAudio: " + String.valueOf(recordAudio));
+        RecordService.recordAudio = recordAudio;
+    }
+
+    public static void setSaveLocation(boolean saveLocation) {
+        Log.d(TAG, "setSaveLocation: " + String.valueOf(saveLocation));
+        RecordService.saveLocation = saveLocation;
     }
 
     public void setCameraId(String cameraId) {

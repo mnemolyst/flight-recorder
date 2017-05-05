@@ -17,19 +17,12 @@
         android:key="pref_tipover"
         android:title="@string/pref_save_on_tipover_title" />
     <ListPreference
-        android:defaultValue="@string/pref_sensitivity_default"
+        android:defaultValue="@string/pref_tipover_threshold_default"
         android:dependency="pref_tipover"
-        android:entries="@array/pref_sensitivity_entries"
-        android:entryValues="@array/pref_sensitivity_entry_values"
-        android:key="pref_sensitivity"
-        android:title="@string/pref_sensitivity_title" />
-    <ListPreference
-        android:defaultValue="0"
-        android:dependency="pref_tipover"
-        android:entries="@array/pref_post_tipover_entries"
-        android:entryValues="@array/pref_post_tipover_entry_values"
-        android:key="pref_post_tipover_duration"
-        android:title="@string/pref_post_tipover_title" />
+        android:entries="@array/pref_tipover_threshold_entries"
+        android:entryValues="@array/pref_tipover_threshold_entries"
+        android:key="pref_tipover_threshold"
+        android:title="@string/pref_tipover_threshold_title" />
     <CheckBoxPreference
         android:defaultValue="true"
         android:key="pref_audio"

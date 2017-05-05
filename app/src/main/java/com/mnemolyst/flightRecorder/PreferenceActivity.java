@@ -4,6 +4,8 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.res.Resources;
+import android.icu.text.AlphabeticIndex;
 import android.os.Bundle;
 import android.preference.CheckBoxPreference;
 import android.preference.EditTextPreference;
@@ -24,8 +26,14 @@ public class PreferenceActivity extends Activity implements SharedPreferences.On
     private static final String TAG = "PreferenceActivity";
     static final String KEY_PREF_DURATION = "pref_duration";
     static final String KEY_PREF_VIDEO_QUALITY = "pref_video_quality";
+    static final String KEY_PREF_TIPOVER = "pref_tipover";
+    static final String KEY_PREF_TIPOVER_THRESHOLD = "pref_tipover_threshold";
+    static final String KEY_PREF_AUDIO = "pref_audio";
     static final String KEY_PREF_LOCATION = "pref_location";
-    private static final int PERM_REQUEST_LOCATION = 2;
+    static final String KEY_PREF_BACKUP = "pref_backup";
+
+    private static final int PERM_REQUEST_AUDIO = 2;
+    private static final int PERM_REQUEST_LOCATION = 3;
     private SettingsFragment settingsFragment;
 
     public static class SettingsFragment extends PreferenceFragment {
@@ -78,6 +86,29 @@ public class PreferenceActivity extends Activity implements SharedPreferences.On
         }
     }
 
+    static void updateServiceFromPrefs(SharedPreferences sharedPreferences, Resources resources) {
+
+        String prefOpt1, prefOpt2, prefDefault;
+
+        RecordService.setRecordDuration(Integer.valueOf(sharedPreferences.getString(KEY_PREF_DURATION, "15")));
+
+        prefOpt1 = resources.getString(R.string.pref_video_quality_1080p);
+        prefOpt2 = resources.getString(R.string.pref_video_quality_720p);
+        prefDefault = resources.getString(R.string.pref_video_quality_default);
+        RecordService.setVideoQuality(sharedPreferences.getString(KEY_PREF_VIDEO_QUALITY, prefDefault), prefOpt1, prefOpt2);
+
+        RecordService.setSaveOnTipover(sharedPreferences.getBoolean(KEY_PREF_TIPOVER, true));
+
+        prefOpt1 = resources.getString(R.string.pref_tipover_threshold_normal);
+        prefOpt2 = resources.getString(R.string.pref_tipover_threshold_high);
+        prefDefault = resources.getString(R.string.pref_tipover_threshold_default);
+        RecordService.setTipoverThreshold(sharedPreferences.getString(KEY_PREF_TIPOVER_THRESHOLD, prefDefault), prefOpt1, prefOpt2);
+
+        RecordService.setRecordAudio(sharedPreferences.getBoolean(KEY_PREF_AUDIO, true));
+
+        RecordService.setSaveLocation(sharedPreferences.getBoolean(KEY_PREF_LOCATION, false));
+    }
+
     public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
 
         Preference preference = settingsFragment.findPreference(key);
@@ -89,23 +120,31 @@ public class PreferenceActivity extends Activity implements SharedPreferences.On
 
         switch (key) {
             case KEY_PREF_DURATION:
-                RecordService.setRecordDuration(Integer.valueOf(sharedPreferences.getString(key, "15")));
-                break;
             case KEY_PREF_VIDEO_QUALITY:
-                String q1080p = getResources().getString(R.string.pref_video_quality_1080p);
-                String q720p = getResources().getString(R.string.pref_video_quality_720p);
-                String qDefault = getResources().getString(R.string.pref_video_quality_default);
-                if (sharedPreferences.getString(key, qDefault).equals(q1080p)) {
-                    RecordService.setVideoQuality(RecordService.VideoQuality.HIGH_1080P);
-                } else if (sharedPreferences.getString(key, qDefault).equals(q720p)) {
-                    RecordService.setVideoQuality(RecordService.VideoQuality.MED_720P);
+            case KEY_PREF_TIPOVER:
+            case KEY_PREF_TIPOVER_THRESHOLD:
+                PreferenceActivity.updateServiceFromPrefs(sharedPreferences, getResources());
+                break;
+            case KEY_PREF_AUDIO:
+                if (sharedPreferences.getBoolean(key, true)) {
+                    if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                        RecordService.setRecordAudio(true);
+                    } else {
+                        ActivityCompat.requestPermissions(this, new String[] { Manifest.permission.RECORD_AUDIO }, PERM_REQUEST_AUDIO);
+                    }
+                } else {
+                    RecordService.setRecordAudio(false);
                 }
                 break;
             case KEY_PREF_LOCATION:
-                if (sharedPreferences.getBoolean(key, true)
-                        && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-
-                    ActivityCompat.requestPermissions(this, new String[] { Manifest.permission.ACCESS_FINE_LOCATION }, PERM_REQUEST_LOCATION);
+                if (sharedPreferences.getBoolean(key, false)) {
+                    if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                        RecordService.setSaveLocation(true);
+                    } else {
+                        ActivityCompat.requestPermissions(this, new String[] { Manifest.permission.ACCESS_COARSE_LOCATION }, PERM_REQUEST_LOCATION);
+                    }
+                } else {
+                    RecordService.setSaveLocation(false);
                 }
                 break;
         }
@@ -115,15 +154,22 @@ public class PreferenceActivity extends Activity implements SharedPreferences.On
     public void onRequestPermissionsResult(int requestCode, @NonNull String permissions[], @NonNull int[] grantResults) {
 
         switch (requestCode) {
-
-            case PERM_REQUEST_LOCATION: {
-
-                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_DENIED) {
-
+            case PERM_REQUEST_AUDIO:
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    RecordService.setRecordAudio(true);
+                } else {
+                    CheckBoxPreference preference = (CheckBoxPreference) settingsFragment.findPreference(KEY_PREF_AUDIO);
+                    preference.setChecked(false);
+                }
+                break;
+            case PERM_REQUEST_LOCATION:
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    RecordService.setSaveLocation(true);
+                } else {
                     CheckBoxPreference preference = (CheckBoxPreference) settingsFragment.findPreference(KEY_PREF_LOCATION);
                     preference.setChecked(false);
                 }
-            }
+                break;
         }
     }
 }

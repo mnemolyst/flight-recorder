@@ -18,6 +18,7 @@ import android.preference.ListPreference;
 import android.preference.PreferenceFragment;
 import android.preference.PreferenceManager;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.app.FragmentManager;
 import android.support.v7.app.AppCompatActivity;
@@ -26,6 +27,11 @@ import android.util.Size;
 import android.view.View;
 import android.widget.Button;
 import android.widget.ImageButton;
+import android.widget.Toast;
+
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.location.LocationServices;
 
 import java.util.ArrayList;
 
@@ -39,7 +45,8 @@ import java.util.ArrayList;
     setOrientationHint
  */
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity
+        implements GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener {
 
     final static String TAG = "FlightRecorder";
     private final static int PERM_REQUEST_CAMERA_STORAGE = 1;
@@ -49,6 +56,8 @@ public class MainActivity extends AppCompatActivity {
     private RecordService recordService = null;
     private ArrayList<String> availableVideoQualities = new ArrayList<>();
 
+    static GoogleApiClient googleApiClient;
+
     private ServiceConnection serviceConnection = new ServiceConnection() {
 
         @Override
@@ -57,6 +66,7 @@ public class MainActivity extends AppCompatActivity {
             RecordService.RecordServiceBinder binder = (RecordService.RecordServiceBinder) service;
             recordService = binder.getService();
             recordService.registerOnStopRecordCallback(onStopRecordCallback);
+            recordService.registerOnOrientationLockedCallback(onOrientationLockedCallback);
 
             // Get available output resolutions
             CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
@@ -89,15 +99,7 @@ public class MainActivity extends AppCompatActivity {
             }
 
             SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(MainActivity.this);
-
-            String q1080p = getResources().getString(R.string.pref_video_quality_1080p);
-            String q720p = getResources().getString(R.string.pref_video_quality_720p);
-            String qDefault = getResources().getString(R.string.pref_video_quality_default);
-            if (sharedPreferences.getString(PreferenceActivity.KEY_PREF_VIDEO_QUALITY, qDefault).equals(q1080p)) {
-                RecordService.setVideoQuality(RecordService.VideoQuality.HIGH_1080P);
-            } else if (sharedPreferences.getString(PreferenceActivity.KEY_PREF_VIDEO_QUALITY, qDefault).equals(q720p)) {
-                RecordService.setVideoQuality(RecordService.VideoQuality.MED_720P);
-            }
+            PreferenceActivity.updateServiceFromPrefs(sharedPreferences, getResources());
         }
 
         @Override
@@ -115,18 +117,41 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
+    private RecordService.OnOrientationLockedCallback onOrientationLockedCallback = new RecordService.OnOrientationLockedCallback() {
+
+        @Override
+        void onOrientationLocked() {
+            Toast.makeText(MainActivity.this, "Locked!", Toast.LENGTH_SHORT).show();
+        }
+    };
+
+    @Override
+    public void onConnected(@Nullable Bundle bundle) {
+
+        Log.d(TAG, "Google connected");
+    }
+
+    @Override
+    public void onConnectionSuspended(int i) {
+
+        Log.d(TAG, "Google disconnect");
+    }
+
+    @Override
+    public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
+
+    }
+
     private void toggleVideoRecord() {
 
         if (recordService.getRecordState().equals(RecordService.RecordState.STOPPED)) {
 
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED
-                    || ActivityCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
-                    || ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                    || ActivityCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
 
                 ActivityCompat.requestPermissions(this, new String[] {
                         Manifest.permission.CAMERA,
                         Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                        Manifest.permission.RECORD_AUDIO
                 }, PERM_REQUEST_CAMERA_STORAGE);
 
                 return;
@@ -167,20 +192,40 @@ public class MainActivity extends AppCompatActivity {
 
         Intent intent = new Intent(this, RecordService.class);
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
+
+        googleApiClient = new GoogleApiClient.Builder(this)
+                .addConnectionCallbacks(this)
+                .addOnConnectionFailedListener(this)
+                .addApi(LocationServices.API)
+                .build();
+    }
+
+    @Override
+    public void onStart() {
+
+        Log.d(TAG, "onStart");
+        super.onStart();
     }
 
     @Override
     public void onPause() {
-        Log.d(TAG, "onPause");
 
+        Log.d(TAG, "onPause");
         super.onPause();
     }
 
     @Override
     public void onStop() {
-        Log.d(TAG, "onStop");
 
+        Log.d(TAG, "onStop");
         super.onStop();
+    }
+
+    @Override
+    public void onDestroy() {
+
+        Log.d(TAG, "onDestroy");
+        super.onDestroy();
     }
 
     @Override
