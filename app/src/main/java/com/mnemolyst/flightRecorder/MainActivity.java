@@ -10,23 +10,18 @@ import android.content.pm.PackageManager;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
-import android.hardware.camera2.params.StreamConfigurationMap;
-import android.media.MediaCodec;
 import android.os.Bundle;
 import android.os.IBinder;
-import android.preference.ListPreference;
-import android.preference.PreferenceFragment;
 import android.preference.PreferenceManager;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.v4.app.ActivityCompat;
-import android.support.v4.app.FragmentManager;
 import android.support.v7.app.AppCompatActivity;
+import android.support.v7.widget.Toolbar;
 import android.util.Log;
-import android.util.Size;
-import android.view.View;
-import android.widget.Button;
-import android.widget.ImageButton;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.MenuItem;
 import android.widget.Toast;
 
 import com.google.android.gms.common.ConnectionResult;
@@ -42,7 +37,7 @@ import java.util.ArrayList;
 /*
     TODO
     video stabilization
-    setOrientationHint
+    "about" screen legal info (Drive)
  */
 
 public class MainActivity extends AppCompatActivity
@@ -51,8 +46,6 @@ public class MainActivity extends AppCompatActivity
     final static String TAG = "FlightRecorder";
     private final static int PERM_REQUEST_CAMERA_STORAGE = 1;
 
-    private Button btnRecord;
-    private ImageButton btnSettings;
     private RecordService recordService = null;
     private ArrayList<String> availableVideoQualities = new ArrayList<>();
 
@@ -65,6 +58,8 @@ public class MainActivity extends AppCompatActivity
 
             RecordService.RecordServiceBinder binder = (RecordService.RecordServiceBinder) service;
             recordService = binder.getService();
+
+            recordService.registerOnStartRecordCallback(onStartRecordCallback);
             recordService.registerOnStopRecordCallback(onStopRecordCallback);
             recordService.registerOnOrientationLockedCallback(onOrientationLockedCallback);
 
@@ -109,11 +104,18 @@ public class MainActivity extends AppCompatActivity
         }
     };
 
+    private RecordService.OnStartRecordCallback onStartRecordCallback = new RecordService.OnStartRecordCallback() {
+        @Override
+        void onStartRecord() {
+
+        }
+    };
+
     private RecordService.OnStopRecordCallback onStopRecordCallback = new RecordService.OnStopRecordCallback() {
 
         void onStopRecord() {
 
-            btnRecord.setText(R.string.start_button);
+//            btnRecord.setText(R.string.start_button);
         }
     };
 
@@ -140,6 +142,7 @@ public class MainActivity extends AppCompatActivity
     @Override
     public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
 
+        Log.e(TAG, "Google connect failed");
     }
 
     private void toggleVideoRecord() {
@@ -158,7 +161,7 @@ public class MainActivity extends AppCompatActivity
             }
 
             recordService.startRecording();
-            btnRecord.setText(R.string.stop_button);
+//            btnRecord.setText(R.string.stop_button);
         } else {
 
             recordService.stopRecording();
@@ -170,25 +173,8 @@ public class MainActivity extends AppCompatActivity
 
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-
-        btnRecord = (Button) findViewById(R.id.btnRecord);
-        btnRecord.setOnClickListener(new View.OnClickListener() {
-
-            @Override
-            public void onClick(View v) {
-                toggleVideoRecord();
-            }
-        });
-
-        btnSettings = (ImageButton) findViewById(R.id.btnPrefs);
-        btnSettings.setOnClickListener(new View.OnClickListener() {
-
-            @Override
-            public void onClick(View v) {
-                Intent intent = new Intent(MainActivity.this, PreferenceActivity.class);
-                startActivity(intent);
-            }
-        });
+        Toolbar myToolbar = (Toolbar) findViewById(R.id.main_toolbar);
+        setSupportActionBar(myToolbar);
 
         Intent intent = new Intent(this, RecordService.class);
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
@@ -235,7 +221,7 @@ public class MainActivity extends AppCompatActivity
 
         if (recordService != null && recordService.getRecordState().equals(RecordService.RecordState.STARTED)) {
 
-            btnRecord.setText(R.string.stop_button);
+//            btnRecord.setText(R.string.stop_button);
         }
     }
 
@@ -243,6 +229,36 @@ public class MainActivity extends AppCompatActivity
     public void onRestart() {
 
         super.onRestart();
+    }
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+
+        MenuInflater menuInflater = getMenuInflater();
+        menuInflater.inflate(R.menu.main_menu, menu);
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem menuItem) {
+
+        Intent intent;
+
+        switch (menuItem.getItemId()) {
+            case R.id.menuItemRecord:
+                toggleVideoRecord();
+                return true;
+            case R.id.menuItemSettings:
+                intent = new Intent(MainActivity.this, PreferenceActivity.class);
+                startActivity(intent);
+                return true;
+            case R.id.menuItemAbout:
+                intent = new Intent(MainActivity.this, AboutActivity.class);
+                startActivity(intent);
+                return true;
+            default:
+                return super.onOptionsItemSelected(menuItem);
+        }
     }
 
     @Override

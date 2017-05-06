@@ -24,6 +24,7 @@ import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CameraMetadata;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
+import android.location.Location;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaCodec;
@@ -41,6 +42,8 @@ import android.support.v4.app.ActivityCompat;
 import android.util.Log;
 import android.util.Size;
 import android.view.Surface;
+
+import com.google.android.gms.location.LocationServices;
 
 import java.io.File;
 import java.io.IOException;
@@ -76,7 +79,7 @@ public class RecordService extends Service {
         HIGH_1080P, MED_720P
     }
     enum TipoverThreshold {
-        NORMAL, HIGH
+        LOW, MEDIUM, HIGH
     }
     private RecordState recordState;
     private DownAxis downAxis = DownAxis.NONE;
@@ -109,12 +112,14 @@ public class RecordService extends Service {
     private SQLiteDatabase videoDb = null;
     private SQLiteOpenHelper audioSqlHelper;
     private SQLiteDatabase audioDb = null;
-    private static int recordDuration = 15_000_000;
+    private static int recordDuration;
     private Integer sensorOrientation = 0;
+    private Location location;
 
     // Gravity sensor event listener variables
-    private final double G_THRESHOLD_NORMAL = SensorManager.GRAVITY_EARTH * sin(PI / 4);
-    private final double G_THRESHOLD_HIGH = SensorManager.GRAVITY_EARTH * sin(PI / 6);
+    private final double G_THRESHOLD_LOW = SensorManager.GRAVITY_EARTH * sin(PI / 4);
+    private final double G_THRESHOLD_MEDIUM = SensorManager.GRAVITY_EARTH * sin(PI / 6);
+    private final double G_THRESHOLD_HIGH = SensorManager.GRAVITY_EARTH * sin(PI / 12);
     private final long TIME_THRESHOLD = (long) 2e9; // 2 seconds
     private long timeAxisDown = 0;
     private long timeTipped = 0;
@@ -122,8 +127,13 @@ public class RecordService extends Service {
 
     private RecordServiceBinder binder = new RecordServiceBinder();
 
-    private OnStopRecordCallback onStopRecordCallback = null;
-    private OnOrientationLockedCallback onOrientationLockedCallback = null;
+    private OnStartRecordCallback onStartRecordCallback;
+    private OnStopRecordCallback onStopRecordCallback;
+    private OnOrientationLockedCallback onOrientationLockedCallback;
+
+    static abstract class OnStartRecordCallback {
+        abstract void onStartRecord();
+    }
 
     static abstract class OnStopRecordCallback {
         abstract void onStopRecord();
@@ -251,13 +261,15 @@ public class RecordService extends Service {
         return false;
     }
 
-    public void registerOnStopRecordCallback(OnStopRecordCallback callback) {
+    public void registerOnStartRecordCallback(OnStartRecordCallback callback) {
+        onStartRecordCallback = callback;
+    }
 
+    public void registerOnStopRecordCallback(OnStopRecordCallback callback) {
         onStopRecordCallback = callback;
     }
 
     public void registerOnOrientationLockedCallback(OnOrientationLockedCallback callback) {
-
         onOrientationLockedCallback = callback;
     }
 
@@ -428,6 +440,10 @@ public class RecordService extends Service {
             if (recordState == RecordState.STARTING) {
 
                 recordState = RecordState.STARTED;
+
+                if (onStartRecordCallback != null) {
+                    onStartRecordCallback.onStartRecord();
+                }
                 calPtDiff = info.presentationTimeUs - Calendar.getInstance().getTimeInMillis() * 1000;
                 audioCodec.start();
             }
@@ -659,8 +675,10 @@ public class RecordService extends Service {
             Log.d(TAG, "diff: " + String.valueOf(event.timestamp - timeAxisDown));*/
 
             double gThreshold;
-            if (tipoverThreshold.equals(TipoverThreshold.NORMAL)) {
-                gThreshold = G_THRESHOLD_NORMAL;
+            if (tipoverThreshold.equals(TipoverThreshold.LOW)) {
+                gThreshold = G_THRESHOLD_LOW;
+            } else if (tipoverThreshold.equals(TipoverThreshold.MEDIUM)) {
+                gThreshold = G_THRESHOLD_MEDIUM;
             } else {
                 gThreshold = G_THRESHOLD_HIGH;
             }
@@ -719,7 +737,9 @@ public class RecordService extends Service {
 
                 if (checkForLock && event.timestamp - timeAxisDown >= TIME_THRESHOLD) {
                     orientationLocked = true;
-                    onOrientationLockedCallback.onOrientationLocked();
+                    if (onOrientationLockedCallback != null) {
+                        onOrientationLockedCallback.onOrientationLocked();
+                    }
                 }
             }
         }
@@ -737,7 +757,7 @@ public class RecordService extends Service {
 
         Notification notification = new Notification.Builder(this)
                 .setContentTitle(getText(R.string.notification_title))
-                .setContentText(getText(R.string.notification_message))
+//                .setContentText(getText(R.string.notification_message))
                 .setSmallIcon(R.drawable.recording_notification_icon)
                 .setContentIntent(pendingIntent)
                 .build();
@@ -784,6 +804,12 @@ public class RecordService extends Service {
 
     void recordingStopped() {
 
+        if (saveLocation
+                && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            location = LocationServices.FusedLocationApi.getLastLocation(MainActivity.googleApiClient);
+        } else {
+            location = null;
+        }
 
         boolean saved = dumpBuffersToFile();
 
@@ -826,7 +852,13 @@ public class RecordService extends Service {
                 audioTrackIdx = mediaMuxer.addTrack(audioFormat);
             }
 
+            if (location != null) {
+                mediaMuxer.setLocation((float) location.getLatitude(), (float) location.getLongitude());
+                Log.d(TAG, "lat: " + String.valueOf(location.getLatitude()));
+                Log.d(TAG, "long: " + String.valueOf(location.getLongitude()));
+            }
             mediaMuxer.setOrientationHint(sensorOrientation);
+
             mediaMuxer.start();
 
             long latestPt = 0;
@@ -945,10 +977,12 @@ public class RecordService extends Service {
         RecordService.saveOnTipover = saveOnTipover;
     }
 
-    public static void setTipoverThreshold(String pref, String normal, String high) {
+    public static void setTipoverThreshold(String pref, String low, String medium, String high) {
         Log.d(TAG, "setTipoverThreshold: " + pref);
-        if (pref.equals(normal)) {
-            RecordService.tipoverThreshold = TipoverThreshold.NORMAL;
+        if (pref.equals(low)) {
+            RecordService.tipoverThreshold = TipoverThreshold.LOW;
+        } else if (pref.equals(medium)) {
+            RecordService.tipoverThreshold = TipoverThreshold.MEDIUM;
         } else if (pref.equals(high)) {
             RecordService.tipoverThreshold = TipoverThreshold.HIGH;
         }

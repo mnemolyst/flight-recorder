@@ -33,7 +33,14 @@
             android:name=".RecordService"
             android:exported="false" />
 
-        <activity android:name=".PreferenceActivity"></activity>
+        <activity android:name=".PreferenceActivity"
+            android:parentActivityName=".MainActivity">
+
+        </activity>
+        <activity android:name=".AboutActivity"
+            android:parentActivityName=".MainActivity">
+
+        </activity>
     </application>
 
 </manifest>

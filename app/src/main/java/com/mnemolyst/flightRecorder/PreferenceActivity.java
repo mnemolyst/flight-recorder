@@ -17,11 +17,14 @@ import android.preference.PreferenceGroup;
 import android.preference.PreferenceManager;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
+import android.support.v7.app.ActionBar;
+import android.support.v7.app.AppCompatActivity;
+import android.support.v7.widget.Toolbar;
 import android.util.Log;
 
 import java.util.List;
 
-public class PreferenceActivity extends Activity implements SharedPreferences.OnSharedPreferenceChangeListener {
+public class PreferenceActivity extends AppCompatActivity implements SharedPreferences.OnSharedPreferenceChangeListener {
 
     private static final String TAG = "PreferenceActivity";
     static final String KEY_PREF_DURATION = "pref_duration";
@@ -51,6 +54,10 @@ public class PreferenceActivity extends Activity implements SharedPreferences.On
 
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_preference);
+        Toolbar toolbar = (Toolbar) findViewById(R.id.pref_toolbar);
+        setSupportActionBar(toolbar);
+        ActionBar actionBar = getSupportActionBar();
+        actionBar.setDisplayHomeAsUpEnabled(true);
 
         PreferenceManager.setDefaultValues(this, R.xml.preferences, false);
 
@@ -63,6 +70,15 @@ public class PreferenceActivity extends Activity implements SharedPreferences.On
 
         super.onResume();
         settingsFragment.getPreferenceScreen().getSharedPreferences().registerOnSharedPreferenceChangeListener(this);
+
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_DENIED) {
+            CheckBoxPreference preference = (CheckBoxPreference) settingsFragment.findPreference(KEY_PREF_AUDIO);
+            preference.setChecked(false);
+        }
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_DENIED) {
+            CheckBoxPreference preference = (CheckBoxPreference) settingsFragment.findPreference(KEY_PREF_LOCATION);
+            preference.setChecked(false);
+        }
     }
 
     @Override
@@ -88,7 +104,7 @@ public class PreferenceActivity extends Activity implements SharedPreferences.On
 
     static void updateServiceFromPrefs(SharedPreferences sharedPreferences, Resources resources) {
 
-        String prefOpt1, prefOpt2, prefDefault;
+        String prefOpt1, prefOpt2, prefOpt3, prefDefault;
 
         RecordService.setRecordDuration(Integer.valueOf(sharedPreferences.getString(KEY_PREF_DURATION, "15")));
 
@@ -99,10 +115,11 @@ public class PreferenceActivity extends Activity implements SharedPreferences.On
 
         RecordService.setSaveOnTipover(sharedPreferences.getBoolean(KEY_PREF_TIPOVER, true));
 
-        prefOpt1 = resources.getString(R.string.pref_tipover_threshold_normal);
-        prefOpt2 = resources.getString(R.string.pref_tipover_threshold_high);
+        prefOpt1 = resources.getString(R.string.pref_tipover_threshold_low);
+        prefOpt2 = resources.getString(R.string.pref_tipover_threshold_medium);
+        prefOpt3 = resources.getString(R.string.pref_tipover_threshold_high);
         prefDefault = resources.getString(R.string.pref_tipover_threshold_default);
-        RecordService.setTipoverThreshold(sharedPreferences.getString(KEY_PREF_TIPOVER_THRESHOLD, prefDefault), prefOpt1, prefOpt2);
+        RecordService.setTipoverThreshold(sharedPreferences.getString(KEY_PREF_TIPOVER_THRESHOLD, prefDefault), prefOpt1, prefOpt2, prefOpt3);
 
         RecordService.setRecordAudio(sharedPreferences.getBoolean(KEY_PREF_AUDIO, true));
 

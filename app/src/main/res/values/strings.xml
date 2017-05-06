@@ -1,12 +1,19 @@
 <resources>
     <string name="app_name">Flight Recorder</string>
-    <string name="start_button">Record</string>
-    <string name="stop_button">Stop</string>
-    <string name="title_activity_main">MainActivity</string>
-    <string name="notification_title">Black Box</string>
+    <string name="notification_title">Recording</string>
     <string name="notification_message">Recording Video</string>
 
+    <!-- Strings related to menus -->
+
+    <string name="menu_record_title">Start recording</string>
+    <string name="menu_settings_title">Settings</string>
+    <string name="menu_about_title">About</string>
+
     <!-- Strings related to settings -->
+
+    <string name="pref_toolbar_title">Settings</string>
+
+    <string name="pref_cat_recording">Recording</string>
 
     <string name="pref_duration_title">Record duration</string>
     <string-array name="pref_duration_entries">
@@ -31,21 +38,31 @@
     </string-array>
     <string name="pref_video_quality_default">@string/pref_video_quality_1080p</string>
 
-    <string name="pref_save_on_tipover_title">Stop recording on tipover</string>
+    <string name="pref_audio_title">Record audio</string>
+
+    <string name="pref_cat_saving">Saving</string>
+
+    <string name="pref_save_on_tipover_title">Save recording on tipover</string>
 
     <string name="pref_tipover_threshold_title">Tipover threshold</string>
-    <string name="pref_tipover_threshold_normal">Normal (45 &#x00B0;)</string>
-    <string name="pref_tipover_threshold_high">High (60 &#x00B0;)</string>
+    <string name="pref_tipover_threshold_low">Low (45 &#x00B0;)</string>
+    <string name="pref_tipover_threshold_medium">Medium (60 &#x00B0;)</string>
+    <string name="pref_tipover_threshold_high">High (75 &#x00B0;)</string>
     <string-array name="pref_tipover_threshold_entries">
-        <item>@string/pref_tipover_threshold_normal</item>
+        <item>@string/pref_tipover_threshold_low</item>
+        <item>@string/pref_tipover_threshold_medium</item>
         <item>@string/pref_tipover_threshold_high</item>
     </string-array>
-    <string name="pref_tipover_threshold_default">@string/pref_tipover_threshold_normal</string>
+    <string name="pref_tipover_threshold_default">@string/pref_tipover_threshold_medium</string>
 
-    <string name="pref_audio_title">Record audio</string>
+    <string name="pref_backup_title">Save to Google Drive</string>
 
     <string name="pref_location_title">Save location</string>
 
-    <string name="pref_backup_title">Backup to Google Drive</string>
+    <!-- Strings related to the about screen -->
+
+    <string name="about_text">
+        Copyright &#x00A9; 2017 by Joshua Salisbury\n\n<b>No warranty is given for this product, not even an implied warranty of fitness for a particular purpose.</b>
+    </string>
 
 </resources>
