@@ -31,6 +31,7 @@ public class PreferenceActivity extends AppCompatActivity implements SharedPrefe
     static final String KEY_PREF_VIDEO_QUALITY = "pref_video_quality";
     static final String KEY_PREF_TIPOVER = "pref_tipover";
     static final String KEY_PREF_TIPOVER_THRESHOLD = "pref_tipover_threshold";
+    static final String KEY_PREF_TIPOVER_TIMEOUT = "pref_tipover_timeout";
     static final String KEY_PREF_AUDIO = "pref_audio";
     static final String KEY_PREF_LOCATION = "pref_location";
     static final String KEY_PREF_BACKUP = "pref_backup";
@@ -61,7 +62,7 @@ public class PreferenceActivity extends AppCompatActivity implements SharedPrefe
 
         PreferenceManager.setDefaultValues(this, R.xml.preferences, false);
 
-        settingsFragment = (SettingsFragment) getFragmentManager().findFragmentById(R.id.settingsFragment);
+        settingsFragment = (SettingsFragment) getFragmentManager().findFragmentById(R.id.settings_fragment);
         initSummary(settingsFragment.getPreferenceScreen());
     }
 
@@ -113,6 +114,8 @@ public class PreferenceActivity extends AppCompatActivity implements SharedPrefe
         prefDefault = resources.getString(R.string.pref_video_quality_default);
         RecordService.setVideoQuality(sharedPreferences.getString(KEY_PREF_VIDEO_QUALITY, prefDefault), prefOpt1, prefOpt2);
 
+        RecordService.setRecordAudio(sharedPreferences.getBoolean(KEY_PREF_AUDIO, true));
+
         RecordService.setSaveOnTipover(sharedPreferences.getBoolean(KEY_PREF_TIPOVER, true));
 
         prefOpt1 = resources.getString(R.string.pref_tipover_threshold_low);
@@ -121,7 +124,7 @@ public class PreferenceActivity extends AppCompatActivity implements SharedPrefe
         prefDefault = resources.getString(R.string.pref_tipover_threshold_default);
         RecordService.setTipoverThreshold(sharedPreferences.getString(KEY_PREF_TIPOVER_THRESHOLD, prefDefault), prefOpt1, prefOpt2, prefOpt3);
 
-        RecordService.setRecordAudio(sharedPreferences.getBoolean(KEY_PREF_AUDIO, true));
+        RecordService.setTipoverTimeout(Integer.valueOf(sharedPreferences.getString(KEY_PREF_TIPOVER_TIMEOUT, "0")));
 
         RecordService.setSaveLocation(sharedPreferences.getBoolean(KEY_PREF_LOCATION, false));
     }
@@ -136,12 +139,6 @@ public class PreferenceActivity extends AppCompatActivity implements SharedPrefe
         }
 
         switch (key) {
-            case KEY_PREF_DURATION:
-            case KEY_PREF_VIDEO_QUALITY:
-            case KEY_PREF_TIPOVER:
-            case KEY_PREF_TIPOVER_THRESHOLD:
-                PreferenceActivity.updateServiceFromPrefs(sharedPreferences, getResources());
-                break;
             case KEY_PREF_AUDIO:
                 if (sharedPreferences.getBoolean(key, true)) {
                     if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
@@ -164,6 +161,8 @@ public class PreferenceActivity extends AppCompatActivity implements SharedPrefe
                     RecordService.setSaveLocation(false);
                 }
                 break;
+            default:
+                PreferenceActivity.updateServiceFromPrefs(sharedPreferences, getResources());
         }
     }
 

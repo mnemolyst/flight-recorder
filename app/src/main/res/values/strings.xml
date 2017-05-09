@@ -17,16 +17,16 @@
 
     <string name="pref_duration_title">Record duration</string>
     <string-array name="pref_duration_entries">
-        <item>5 seconds</item>
-        <item>15 seconds</item>
+        <item>10 seconds</item>
         <item>30 seconds</item>
-        <item>60 seconds</item>
+        <item>1 minute</item>
+        <item>2 minutes</item>
     </string-array>
     <string-array name="pref_duration_entry_values">
-        <item>5</item>
-        <item>15</item>
+        <item>10</item>
         <item>30</item>
         <item>60</item>
+        <item>120</item>
     </string-array>
 
     <string name="pref_video_quality_title">Video quality</string>
@@ -54,6 +54,20 @@
         <item>@string/pref_tipover_threshold_high</item>
     </string-array>
     <string name="pref_tipover_threshold_default">@string/pref_tipover_threshold_medium</string>
+
+    <string name="pref_tipover_timeout_title">Tipover timeout</string>
+    <string-array name="pref_tipover_timeout_entries">
+        <item>0 sec</item>
+        <item>1 sec</item>
+        <item>2 sec</item>
+        <item>3 sec</item>
+    </string-array>
+    <string-array name="pref_tipover_timeout_entry_values">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+    </string-array>
 
     <string name="pref_backup_title">Save to Google Drive</string>
 

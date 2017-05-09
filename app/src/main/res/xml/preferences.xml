@@ -4,7 +4,7 @@
         android:title="@string/pref_cat_recording"
         android:key="pref_cat_recording">
         <ListPreference
-            android:defaultValue="15"
+            android:defaultValue="30"
             android:entries="@array/pref_duration_entries"
             android:entryValues="@array/pref_duration_entry_values"
             android:key="pref_duration"
@@ -34,6 +34,13 @@
             android:entryValues="@array/pref_tipover_threshold_entries"
             android:key="pref_tipover_threshold"
             android:title="@string/pref_tipover_threshold_title" />
+        <ListPreference
+            android:defaultValue="1"
+            android:dependency="pref_tipover"
+            android:entries="@array/pref_tipover_timeout_entries"
+            android:entryValues="@array/pref_tipover_timeout_entry_values"
+            android:key="pref_tipover_timeout"
+            android:title="@string/pref_tipover_timeout_title" />
         <CheckBoxPreference
             android:defaultValue="false"
             android:key="pref_location"

@@ -5,16 +5,10 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.hardware.camera2.CameraAccessException;
-import android.hardware.camera2.CameraCharacteristics;
-import android.hardware.camera2.CameraManager;
 import android.os.Bundle;
 import android.os.IBinder;
-import android.preference.PreferenceManager;
 import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
 import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
@@ -23,10 +17,6 @@ import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.widget.Toast;
-
-import com.google.android.gms.common.ConnectionResult;
-import com.google.android.gms.common.api.GoogleApiClient;
-import com.google.android.gms.location.LocationServices;
 
 import java.util.ArrayList;
 
@@ -40,31 +30,31 @@ import java.util.ArrayList;
     "about" screen legal info (Drive)
  */
 
-public class MainActivity extends AppCompatActivity
-        implements GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener {
+public class MainActivity extends AppCompatActivity {
 
-    final static String TAG = "FlightRecorder";
+    final static String TAG = "MainActivity";
     private final static int PERM_REQUEST_CAMERA_STORAGE = 1;
 
     private RecordService recordService = null;
     private ArrayList<String> availableVideoQualities = new ArrayList<>();
-
-    static GoogleApiClient googleApiClient;
 
     private ServiceConnection serviceConnection = new ServiceConnection() {
 
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
 
+            Log.d(TAG, "onServiceConnected");
+
             RecordService.RecordServiceBinder binder = (RecordService.RecordServiceBinder) service;
             recordService = binder.getService();
 
             recordService.registerOnStartRecordCallback(onStartRecordCallback);
-            recordService.registerOnStopRecordCallback(onStopRecordCallback);
             recordService.registerOnOrientationLockedCallback(onOrientationLockedCallback);
+            recordService.registerOnTipoverCallback(onTipoverCallback);
+            recordService.registerOnStopRecordCallback(onStopRecordCallback);
 
             // Get available output resolutions
-            CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+            /*CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
 
             try {
                 String[] cameraIdList = cameraManager.getCameraIdList();
@@ -74,7 +64,7 @@ public class MainActivity extends AppCompatActivity
                     if (characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK) {
 
                         recordService.setCameraId(id);
-                        /*StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+                        *//*StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
                         Size[] outputSizes = map.getOutputSizes(MediaCodec.class);
 
                         availableVideoQualities = new ArrayList<>();
@@ -84,7 +74,7 @@ public class MainActivity extends AppCompatActivity
                             } else if (s.getWidth() == 1280 && s.getHeight() == 720) {
                                 availableVideoQualities.add(getResources().getString(R.string.pref_video_quality_720p));
                             }
-                        }*/
+                        }*//*
 
                         break;
                     }
@@ -94,11 +84,13 @@ public class MainActivity extends AppCompatActivity
             }
 
             SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(MainActivity.this);
-            PreferenceActivity.updateServiceFromPrefs(sharedPreferences, getResources());
+            PreferenceActivity.updateServiceFromPrefs(sharedPreferences, getResources());*/
         }
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
+
+            Log.d(TAG, "onServiceDisconnected");
 
             recordService = null;
         }
@@ -108,14 +100,7 @@ public class MainActivity extends AppCompatActivity
         @Override
         void onStartRecord() {
 
-        }
-    };
-
-    private RecordService.OnStopRecordCallback onStopRecordCallback = new RecordService.OnStopRecordCallback() {
-
-        void onStopRecord() {
-
-//            btnRecord.setText(R.string.start_button);
+//            btnRecord.setText(R.string.stop_button);
         }
     };
 
@@ -127,27 +112,27 @@ public class MainActivity extends AppCompatActivity
         }
     };
 
-    @Override
-    public void onConnected(@Nullable Bundle bundle) {
+    private RecordService.OnTipoverCallback onTipoverCallback = new RecordService.OnTipoverCallback() {
 
-        Log.d(TAG, "Google connected");
-    }
+        @Override
+        void onTipover() {
+            Toast.makeText(MainActivity.this, "Tipover!", Toast.LENGTH_SHORT).show();
+        }
+    };
 
-    @Override
-    public void onConnectionSuspended(int i) {
+    private RecordService.OnStopRecordCallback onStopRecordCallback = new RecordService.OnStopRecordCallback() {
 
-        Log.d(TAG, "Google disconnect");
-    }
+        void onStopRecord() {
 
-    @Override
-    public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
+            unbindService(serviceConnection);
+            recordService = null;
+//            btnRecord.setText(R.string.start_button);
+        }
+    };
 
-        Log.e(TAG, "Google connect failed");
-    }
+    private void toggleRecording() {
 
-    private void toggleVideoRecord() {
-
-        if (recordService.getRecordState().equals(RecordService.RecordState.STOPPED)) {
+        if (recordService == null) {
 
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED
                     || ActivityCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
@@ -160,12 +145,18 @@ public class MainActivity extends AppCompatActivity
                 return;
             }
 
-            recordService.startRecording();
-//            btnRecord.setText(R.string.stop_button);
+            startRecording();
         } else {
 
             recordService.stopRecording();
         }
+    }
+
+    private void startRecording() {
+
+        Intent intent = new Intent(this, RecordService.class);
+        startService(intent);
+        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
     }
 
     @Override
@@ -175,15 +166,6 @@ public class MainActivity extends AppCompatActivity
         setContentView(R.layout.activity_main);
         Toolbar myToolbar = (Toolbar) findViewById(R.id.main_toolbar);
         setSupportActionBar(myToolbar);
-
-        Intent intent = new Intent(this, RecordService.class);
-        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
-
-        googleApiClient = new GoogleApiClient.Builder(this)
-                .addConnectionCallbacks(this)
-                .addOnConnectionFailedListener(this)
-                .addApi(LocationServices.API)
-                .build();
     }
 
     @Override
@@ -211,6 +193,8 @@ public class MainActivity extends AppCompatActivity
     public void onDestroy() {
 
         Log.d(TAG, "onDestroy");
+
+//        unbindService(serviceConnection);
         super.onDestroy();
     }
 
@@ -246,7 +230,7 @@ public class MainActivity extends AppCompatActivity
 
         switch (menuItem.getItemId()) {
             case R.id.menuItemRecord:
-                toggleVideoRecord();
+                toggleRecording();
                 return true;
             case R.id.menuItemSettings:
                 intent = new Intent(MainActivity.this, PreferenceActivity.class);
@@ -270,7 +254,7 @@ public class MainActivity extends AppCompatActivity
 
                 if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
 
-                    recordService.startRecording();
+                    startRecording();
                 } else {
 
                     Log.d(TAG, "Camera permission denied!");
