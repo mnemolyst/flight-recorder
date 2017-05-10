@@ -2,6 +2,8 @@ package com.mnemolyst.flightRecorder;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.Intent;
+import android.content.IntentSender;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.Resources;
@@ -16,15 +18,23 @@ import android.preference.PreferenceFragment;
 import android.preference.PreferenceGroup;
 import android.preference.PreferenceManager;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.ActionBar;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
 import android.util.Log;
 
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.GoogleApiAvailability;
+import com.google.android.gms.common.GooglePlayServicesUtil;
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.drive.Drive;
+import com.google.android.gms.location.LocationServices;
+
 import java.util.List;
 
-public class PreferenceActivity extends AppCompatActivity implements SharedPreferences.OnSharedPreferenceChangeListener {
+public class PreferenceActivity extends AppCompatActivity implements GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener, SharedPreferences.OnSharedPreferenceChangeListener {
 
     private static final String TAG = "PreferenceActivity";
     static final String KEY_PREF_DURATION = "pref_duration";
@@ -47,6 +57,55 @@ public class PreferenceActivity extends AppCompatActivity implements SharedPrefe
 
             super.onCreate(savedInstanceState);
             addPreferencesFromResource(R.xml.preferences);
+        }
+    }
+
+    /*
+    *  Callbacks for Google Android API
+    */
+    @Override
+    public void onConnected(@Nullable Bundle bundle) {
+
+        Log.d(TAG, "Google connected");
+    }
+
+    @Override
+    public void onConnectionSuspended(int i) {
+
+        Log.d(TAG, "Google disconnect");
+    }
+
+    @Override
+    public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
+
+        Log.e(TAG, "Google connect failed");
+
+        if (connectionResult.hasResolution()) {
+            try {
+                connectionResult.startResolutionForResult(this, ConnectionResult.RESOLUTION_REQUIRED);
+            } catch (IntentSender.SendIntentException e) {
+                // Unable to resolve, message user appropriately
+            }
+        } else {
+            GoogleApiAvailability.getInstance().getErrorDialog(this, connectionResult.getErrorCode(), 0);
+        }
+    }
+    /*
+     *  Google Android API
+     */
+
+    @Override
+    protected void onActivityResult(final int requestCode, final int resultCode, final Intent data) {
+        switch (requestCode) {
+            case ConnectionResult.RESOLUTION_REQUIRED:
+                if (resultCode == RESULT_OK) {
+                    Log.d(TAG, "Google connecting again");
+                    MainActivity.googleApiClient.connect();
+                } else {
+                    CheckBoxPreference preference = (CheckBoxPreference) settingsFragment.findPreference(KEY_PREF_BACKUP);
+                    preference.setChecked(false);
+                }
+                break;
         }
     }
 
@@ -153,12 +212,29 @@ public class PreferenceActivity extends AppCompatActivity implements SharedPrefe
             case KEY_PREF_LOCATION:
                 if (sharedPreferences.getBoolean(key, false)) {
                     if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+
                         RecordService.setSaveLocation(true);
+
+                        if (! MainActivity.hasLocationApi()) {
+                            MainActivity.restartGoogleApiClient(this);
+                        }
                     } else {
                         ActivityCompat.requestPermissions(this, new String[] { Manifest.permission.ACCESS_COARSE_LOCATION }, PERM_REQUEST_LOCATION);
                     }
                 } else {
                     RecordService.setSaveLocation(false);
+                }
+                break;
+            case KEY_PREF_BACKUP:
+                if (sharedPreferences.getBoolean(key, false)) {
+
+                    RecordService.setBackupToDrive(true);
+
+                    if (! MainActivity.hasDriveApi()) {
+                        MainActivity.restartGoogleApiClient(this);
+                    }
+                } else {
+                    RecordService.setBackupToDrive(false);
                 }
                 break;
             default:
@@ -186,6 +262,8 @@ public class PreferenceActivity extends AppCompatActivity implements SharedPrefe
                     preference.setChecked(false);
                 }
                 break;
+            default:
+                Log.d(TAG, "OTHER");
         }
     }
 }

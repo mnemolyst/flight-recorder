@@ -8,6 +8,7 @@ import android.app.Service;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.Context;
+import android.content.IntentSender;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
@@ -45,12 +46,24 @@ import android.support.v4.app.ActivityCompat;
 import android.util.Log;
 import android.view.Surface;
 
-import com.google.android.gms.common.ConnectionResult;
-import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.common.api.Result;
+import com.google.android.gms.common.api.ResultCallback;
+import com.google.android.gms.common.api.Status;
+import com.google.android.gms.drive.Drive;
+import com.google.android.gms.drive.DriveApi;
+import com.google.android.gms.drive.DriveContents;
+import com.google.android.gms.drive.DriveFolder;
+import com.google.android.gms.drive.DriveId;
+import com.google.android.gms.drive.MetadataChangeSet;
 import com.google.android.gms.location.LocationServices;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -66,11 +79,11 @@ import static java.lang.Math.sin;
  * An {@link IntentService} subclass for handling asynchronous task requests in
  * a service on a separate handler thread.
  */
-public class RecordService extends Service
-        implements GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener {
+public class RecordService extends Service {
 
     private final static String TAG = "RecordService";
     private final static int ONGOING_NOTIFICATION_ID = 1;
+    private final static String KEY_DRIVE_FOLDER_ID = "drive_folder";
 
     private final Object lockObj = new Object();
 
@@ -94,8 +107,6 @@ public class RecordService extends Service
     private CameraDevice cameraDevice;
     private CaptureRequest.Builder captureRequestBuilder;
     private CameraCaptureSession cameraCaptureSession;
-    private boolean videoSize1080pAvailable = false;
-    private boolean videoSize720pAvailable = false;
     private MediaCodec videoCodec;
     private Surface videoInputSurface;
     private MediaCodec audioCodec;
@@ -103,6 +114,7 @@ public class RecordService extends Service
     private MediaFormat audioFormat;
     private ArrayList<BufferDataInfoPair> videoBufferList = new ArrayList<>();
     private ArrayList<BufferDataInfoPair> audioBufferList = new ArrayList<>();
+    private File externalFile;
 
     private AudioRecord audioRecord;
     private int audioSampleRate = 48000;
@@ -112,6 +124,7 @@ public class RecordService extends Service
     private static boolean saveOnTipover = true;
     private static boolean recordAudio = true;
     private static boolean saveLocation = false;
+    private static boolean backupToDrive = false;
 
     private SQLiteOpenHelper videoSqlHelper;
     private SQLiteDatabase videoDb = null;
@@ -120,8 +133,6 @@ public class RecordService extends Service
     private static int recordDuration;
     private Integer sensorOrientation = 0;
     private Location location;
-
-    private GoogleApiClient googleApiClient;
 
     // Gravity sensor event listener variables
     private final double G_THRESHOLD_LOW = SensorManager.GRAVITY_EARTH * sin(PI / 4);
@@ -234,24 +245,6 @@ public class RecordService extends Service
         }
     }
 
-    @Override
-    public void onConnected(@Nullable Bundle bundle) {
-
-        Log.d(TAG, "Google connected");
-    }
-
-    @Override
-    public void onConnectionSuspended(int i) {
-
-        Log.d(TAG, "Google disconnect");
-    }
-
-    @Override
-    public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
-
-        Log.e(TAG, "Google connect failed");
-    }
-
     public void registerOnStartRecordCallback(OnStartRecordCallback callback) {
         onStartRecordCallback = callback;
     }
@@ -268,19 +261,12 @@ public class RecordService extends Service
         onStopRecordCallback = callback;
     }
 
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
 
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
         PreferenceActivity.updateServiceFromPrefs(sharedPreferences, getResources());
-
-        googleApiClient = new GoogleApiClient.Builder(this)
-                .addConnectionCallbacks(this)
-                .addOnConnectionFailedListener(this)
-                .addApi(LocationServices.API)
-                .build();
-
-        googleApiClient.connect();
 
         videoSqlHelper = new EncodedVideoHelper(this);
         videoDb = videoSqlHelper.getWritableDatabase();
@@ -312,7 +298,6 @@ public class RecordService extends Service
 
         Log.d(TAG, "onDestroy");
         stopRecording();
-        googleApiClient.disconnect();
 
         videoDb.close();
         audioDb.close();
@@ -545,7 +530,9 @@ public class RecordService extends Service
                 calPtDiff = info.presentationTimeUs - Calendar.getInstance().getTimeInMillis() * 1000;
 
                 // Once video capture begins, start audio capture.
-                audioCodec.start();
+                if (audioRecord.getState() == AudioRecord.STATE_INITIALIZED) {
+                    audioCodec.start();
+                }
             }
 
             ByteBuffer outputBuffer = codec.getOutputBuffer(index);
@@ -881,21 +868,25 @@ public class RecordService extends Service
         }
     }
 
-    void cameraStopped() {
+    private void cameraStopped() {
 
         Log.d(TAG, "cameraStopped");
 
         videoCodec.signalEndOfInputStream();
 
+        if (audioRecord.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) {
+            audioRecord.stop();
+            audioRecord.release();
+        }
+
         if (saveLocation
-                && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-            location = LocationServices.FusedLocationApi.getLastLocation(googleApiClient);
+                && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                && MainActivity.hasLocationApi()) {
+
+            location = LocationServices.FusedLocationApi.getLastLocation(MainActivity.googleApiClient);
         } else {
             location = null;
         }
-
-        audioRecord.stop();
-        audioRecord.release();
 
         boolean saved = dumpBuffersToFile();
 
@@ -912,18 +903,20 @@ public class RecordService extends Service
         stopSelf();
     }
 
-    boolean dumpBuffersToFile() {
+    private boolean dumpBuffersToFile() {
 
         String state = Environment.getExternalStorageState();
 
         if (Environment.MEDIA_MOUNTED.equals(state)
                 && ActivityCompat.checkSelfPermission(RecordService.this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
 
-            File savedFile = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "test.mp4");
-            String filePath = savedFile.getAbsolutePath();
+            externalFile = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "test.mp4");
 
             MediaMuxer mediaMuxer = null;
             try {
+                externalFile.delete();
+                externalFile.createNewFile();
+                String filePath = externalFile.getAbsolutePath();
                 mediaMuxer = new MediaMuxer(filePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
             } catch (IOException e) {
                 e.printStackTrace();
@@ -1021,6 +1014,29 @@ public class RecordService extends Service
             mediaMuxer.stop();
             mediaMuxer.release();
 
+            SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
+
+            if (sharedPreferences.getBoolean(PreferenceActivity.KEY_PREF_BACKUP, false)
+                    && MainActivity.hasDriveApi()) {
+
+                /*String folderId = sharedPreferences.getString(KEY_DRIVE_FOLDER_ID, null);
+                DriveId driveId = null;
+                if (folderId != null) {
+                    driveId = DriveId.decodeFromString(folderId);
+                }
+                if (driveId != null) {
+                    DriveFolder driveFolder = driveId.asDriveFolder();
+                }
+
+                MetadataChangeSet changeSet = new MetadataChangeSet.Builder()
+                        .setTitle("Flight Recorder").build();
+
+                Drive.DriveApi.getRootFolder(MainActivity.googleApiClient).createFolder(
+                        MainActivity.googleApiClient, changeSet).setResultCallback(folderCreatedCallback);*/
+
+                Drive.DriveApi.newDriveContents(MainActivity.googleApiClient).setResultCallback(driveContentsResultCallback);
+            }
+
             return true;
         } else {
             Log.e(TAG, "External media unavailable: " + state);
@@ -1028,6 +1044,51 @@ public class RecordService extends Service
             return false;
         }
     }
+
+    private ResultCallback<DriveApi.DriveContentsResult> driveContentsResultCallback = new ResultCallback<DriveApi.DriveContentsResult>() {
+
+        @Override
+        public void onResult(@NonNull DriveApi.DriveContentsResult driveContentsResult) {
+
+            Log.d(TAG, "driveContentsCallback.onResult");
+
+            DriveContents driveContents = driveContentsResult.getDriveContents();
+
+            try {
+                FileInputStream fileInputStream = new FileInputStream(externalFile);
+                OutputStream outputStream = driveContents.getOutputStream();
+
+                byte[] buffer = new byte[1024 * 10];
+                int len;
+                while ((len = fileInputStream.read(buffer)) != -1) {
+                    outputStream.write(buffer, 0, len);
+                }
+
+                fileInputStream.close();
+                outputStream.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+                return;
+            }
+
+
+            MetadataChangeSet changeSet = new MetadataChangeSet.Builder()
+                    .setTitle("Test Recording.mp4")
+                    .setMimeType("video/mp4").build();
+
+            Drive.DriveApi.getRootFolder(MainActivity.googleApiClient).createFile(MainActivity.googleApiClient, changeSet, driveContents);
+        }
+    };
+
+    private ResultCallback<DriveFolder.DriveFolderResult> folderCreatedCallback = new ResultCallback<DriveFolder.DriveFolderResult>() {
+        @Override
+        public void onResult(@NonNull DriveFolder.DriveFolderResult driveFolderResult) {
+            Status status = driveFolderResult.getStatus();
+            if (status.isSuccess()) {
+                driveFolderResult.getDriveFolder().getDriveId();
+            }
+        }
+    };
 
     private void releaseResources() {
 
@@ -1087,5 +1148,10 @@ public class RecordService extends Service
     public static void setSaveLocation(boolean saveLocation) {
         Log.d(TAG, "setSaveLocation: " + String.valueOf(saveLocation));
         RecordService.saveLocation = saveLocation;
+    }
+
+    public static void setBackupToDrive(boolean backupToDrive) {
+        Log.d(TAG, "setBackupToDrive: " + String.valueOf(backupToDrive));
+        RecordService.backupToDrive = backupToDrive;
     }
 }

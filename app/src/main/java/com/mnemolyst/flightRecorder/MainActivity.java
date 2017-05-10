@@ -1,14 +1,19 @@
 package com.mnemolyst.flightRecorder;
 
 import android.Manifest;
+import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentSender;
 import android.content.ServiceConnection;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.os.IBinder;
+import android.preference.PreferenceManager;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
@@ -17,6 +22,13 @@ import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.widget.Toast;
+
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.GoogleApiAvailability;
+import com.google.android.gms.common.GooglePlayServicesUtil;
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.drive.Drive;
+import com.google.android.gms.location.LocationServices;
 
 import java.util.ArrayList;
 
@@ -30,10 +42,12 @@ import java.util.ArrayList;
     "about" screen legal info (Drive)
  */
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener {
 
     final static String TAG = "MainActivity";
     private final static int PERM_REQUEST_CAMERA_STORAGE = 1;
+
+    static GoogleApiClient googleApiClient;
 
     private RecordService recordService = null;
     private ArrayList<String> availableVideoQualities = new ArrayList<>();
@@ -95,6 +109,57 @@ public class MainActivity extends AppCompatActivity {
             recordService = null;
         }
     };
+
+    /*
+     *  Callbacks for Google Android API
+     */
+    @Override
+    public void onConnected(@Nullable Bundle bundle) {
+
+        Log.d(TAG, "Google connected");
+    }
+
+    @Override
+    public void onConnectionSuspended(int i) {
+
+        Log.d(TAG, "Google disconnect");
+    }
+
+    @Override
+    public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
+
+        Log.e(TAG, "Google connect failed");
+
+        if (connectionResult.hasResolution()) {
+            try {
+                connectionResult.startResolutionForResult(this, ConnectionResult.RESOLUTION_REQUIRED);
+            } catch (IntentSender.SendIntentException e) {
+                // Unable to resolve, message user appropriately
+            }
+        } else {
+            GoogleApiAvailability.getInstance().getErrorDialog(this, connectionResult.getErrorCode(), 0).show();
+        }
+    }
+    /*
+     *  Google Android API
+     */
+
+    @Override
+    protected void onActivityResult(final int requestCode, final int resultCode, final Intent data) {
+        switch (requestCode) {
+            case ConnectionResult.RESOLUTION_REQUIRED:
+                if (resultCode == RESULT_OK) {
+                    Log.d(TAG, "Google connecting again");
+                    googleApiClient.connect();
+                } else {
+                    SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
+                    SharedPreferences.Editor editor = sharedPreferences.edit();
+                    editor.putBoolean(PreferenceActivity.KEY_PREF_BACKUP, false);
+                    editor.commit();
+                }
+                break;
+        }
+    }
 
     private RecordService.OnStartRecordCallback onStartRecordCallback = new RecordService.OnStartRecordCallback() {
         @Override
@@ -166,6 +231,51 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
         Toolbar myToolbar = (Toolbar) findViewById(R.id.main_toolbar);
         setSupportActionBar(myToolbar);
+
+        if (googleApiClient == null
+                || !(googleApiClient.isConnected() || googleApiClient.isConnecting())) {
+
+            MainActivity.restartGoogleApiClient(this);
+        }
+    }
+
+    static boolean hasLocationApi() {
+        return googleApiClient != null && googleApiClient.hasConnectedApi(LocationServices.API);
+    }
+
+    static boolean hasDriveApi() {
+        return googleApiClient != null && googleApiClient.hasConnectedApi(Drive.API);
+    }
+
+    static void restartGoogleApiClient(Activity activity) {
+
+        Log.d(TAG, "restartGoogleApiClient");
+
+        if (googleApiClient != null && googleApiClient.isConnected()) {
+            googleApiClient.disconnect();
+        }
+
+        GoogleApiClient.Builder builder = new GoogleApiClient.Builder(activity)
+                .addConnectionCallbacks((GoogleApiClient.ConnectionCallbacks) activity)
+                .addOnConnectionFailedListener((GoogleApiClient.OnConnectionFailedListener) activity);
+
+        boolean worthIt = false;
+        SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(activity);
+
+        if (sharedPreferences.getBoolean(PreferenceActivity.KEY_PREF_BACKUP, false)) {
+            Log.d(TAG, "Adding Drive API");
+            builder.addApi(Drive.API).addScope(Drive.SCOPE_FILE);
+            worthIt = true;
+        }
+        if (sharedPreferences.getBoolean(PreferenceActivity.KEY_PREF_LOCATION, false)) {
+            Log.d(TAG, "Adding Location API");
+            builder.addApi(LocationServices.API);
+            worthIt = true;
+        }
+        if (worthIt) {
+            googleApiClient = builder.build();
+            googleApiClient.connect();
+        }
     }
 
     @Override
