@@ -15,10 +15,6 @@
             android:entryValues="@array/pref_video_quality_entries"
             android:key="pref_video_quality"
             android:title="@string/pref_video_quality_title" />
-        <CheckBoxPreference
-            android:defaultValue="true"
-            android:key="pref_audio"
-            android:title="@string/pref_audio_title" />
     </PreferenceCategory>
     <PreferenceCategory
         android:title="@string/pref_cat_saving"

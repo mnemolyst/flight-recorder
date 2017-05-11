@@ -8,7 +8,6 @@ import android.app.Service;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.Context;
-import android.content.IntentSender;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
@@ -35,35 +34,28 @@ import android.media.MediaFormat;
 import android.media.MediaMuxer;
 import android.media.MediaRecorder;
 import android.os.Binder;
-import android.os.Bundle;
 import android.os.Environment;
 import android.os.IBinder;
 import android.preference.PreferenceManager;
 import android.provider.BaseColumns;
 import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
 import android.support.v4.app.ActivityCompat;
 import android.util.Log;
 import android.view.Surface;
 
-import com.google.android.gms.common.api.Result;
 import com.google.android.gms.common.api.ResultCallback;
 import com.google.android.gms.common.api.Status;
 import com.google.android.gms.drive.Drive;
 import com.google.android.gms.drive.DriveApi;
 import com.google.android.gms.drive.DriveContents;
 import com.google.android.gms.drive.DriveFolder;
-import com.google.android.gms.drive.DriveId;
 import com.google.android.gms.drive.MetadataChangeSet;
 import com.google.android.gms.location.LocationServices;
 
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.io.Writer;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -102,7 +94,7 @@ public class RecordService extends Service {
     private RecordState recordState = RecordState.STOPPED;
     private DownAxis downAxis = DownAxis.NONE;
     private static VideoQuality videoQuality;
-    private static TipoverThreshold tipoverThreshold;
+//    private static TipoverThreshold tipoverThreshold;
     private static int tipoverTimeout;
     private CameraDevice cameraDevice;
     private CaptureRequest.Builder captureRequestBuilder;
@@ -116,13 +108,13 @@ public class RecordService extends Service {
     private ArrayList<BufferDataInfoPair> audioBufferList = new ArrayList<>();
     private File externalFile;
 
+    private boolean recordAudio = true;
     private AudioRecord audioRecord;
     private int audioSampleRate = 48000;
     private int audioChunkBytes = audioSampleRate * 2 / 24;
-    private long calPtDiff = -1;
 
+    private long calPtDiff = -1;
     private static boolean saveOnTipover = true;
-    private static boolean recordAudio = true;
     private static boolean saveLocation = false;
     private static boolean backupToDrive = false;
 
@@ -135,16 +127,15 @@ public class RecordService extends Service {
     private Location location;
 
     // Gravity sensor event listener variables
-    private final double G_THRESHOLD_LOW = SensorManager.GRAVITY_EARTH * sin(PI / 4);
-    private final double G_THRESHOLD_MEDIUM = SensorManager.GRAVITY_EARTH * sin(PI / 6);
-    private final double G_THRESHOLD_HIGH = SensorManager.GRAVITY_EARTH * sin(PI / 12);
+    private final static double G_THRESHOLD_LOW = SensorManager.GRAVITY_EARTH * sin(PI / 4);
+    private final static double G_THRESHOLD_MEDIUM = SensorManager.GRAVITY_EARTH * sin(PI / 6);
+    private final static double G_THRESHOLD_HIGH = SensorManager.GRAVITY_EARTH * sin(PI / 12);
+    private static double gThreshold;
     private final long LOCK_TIMEOUT = (long) 2e9; // 2 seconds
     private long timeAxisDown = 0;
     private long timeTipped = 0;
     private boolean orientationLocked = false;
-    private boolean lockedButTipped = false;
-
-    private RecordServiceBinder binder = new RecordServiceBinder();
+    private boolean tippedButLocked = false;
 
     private OnStartRecordCallback onStartRecordCallback;
     private OnOrientationLockedCallback onOrientationLockedCallback;
@@ -165,14 +156,6 @@ public class RecordService extends Service {
 
     static abstract class OnStopRecordCallback {
         abstract void onStopRecord();
-    }
-
-    class RecordServiceBinder extends Binder {
-
-        RecordService getService() {
-
-            return RecordService.this;
-        }
     }
 
     private class EncodedVideoContract {
@@ -261,9 +244,16 @@ public class RecordService extends Service {
         onStopRecordCallback = callback;
     }
 
+    class RecordServiceBinder extends Binder {
+
+        RecordService getService() {
+
+            return RecordService.this;
+        }
+    }
 
     @Override
-    public int onStartCommand(Intent intent, int flags, int startId) {
+    public void onCreate() {
 
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
         PreferenceActivity.updateServiceFromPrefs(sharedPreferences, getResources());
@@ -273,7 +263,12 @@ public class RecordService extends Service {
 
         audioSqlHelper = new EncodedAudioHelper(this);
         audioDb = audioSqlHelper.getWritableDatabase();
+    }
 
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+
+        recordState = RecordState.STOPPED;
         startRecording();
 
         return START_NOT_STICKY;
@@ -283,7 +278,7 @@ public class RecordService extends Service {
     public IBinder onBind(Intent intent) {
 
         Log.d(TAG, "onBind");
-        return binder;
+        return new RecordServiceBinder();
     }
 
     @Override
@@ -297,10 +292,7 @@ public class RecordService extends Service {
     public void onDestroy() {
 
         Log.d(TAG, "onDestroy");
-        stopRecording();
-
-        videoDb.close();
-        audioDb.close();
+        releaseResources();
     }
 
     private void startRecording() {
@@ -309,42 +301,35 @@ public class RecordService extends Service {
 
             public void run() {
 
-                openCamera();
-            }
-        }).run();
-    }
+                if (ActivityCompat.checkSelfPermission(RecordService.this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_DENIED) {
+                    Log.e(TAG, "No camera permission!");
+                    stopSelf();
+                    return;
+                }
 
-    private void openCamera() {
+                recordAudio = ActivityCompat.checkSelfPermission(RecordService.this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
 
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            return;
-        }
+                CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
 
-        CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+                try {
 
-        try {
+                    String[] cameraIdList = cameraManager.getCameraIdList();
+                    for (String id : cameraIdList) {
 
-            String[] cameraIdList = cameraManager.getCameraIdList();
-            for (String id : cameraIdList) {
+                        CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(id);
+                        if (characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK) {
 
-                CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(id);
-                if (characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK) {
+                            sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
 
-                    sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
-
-                    /*StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-                    Size[] codecOutputSizes = map.getOutputSizes(MediaCodec.class);
-                    for (Size s : codecOutputSizes) {
-                        Log.d(TAG, String.valueOf(s.getWidth()) + ", " + String.valueOf(s.getHeight()));
-                    }*/
-
-                    cameraManager.openCamera(id, cameraStateCallback, null);
-                    break;
+                            cameraManager.openCamera(id, cameraStateCallback, null);
+                            break;
+                        }
+                    }
+                } catch (CameraAccessException e) {
+                    e.printStackTrace();
                 }
             }
-        } catch (CameraAccessException e) {
-            e.printStackTrace();
-        }
+        }).run();
     }
 
     private CameraDevice.StateCallback cameraStateCallback = new CameraDevice.StateCallback() {
@@ -366,28 +351,13 @@ public class RecordService extends Service {
 
         @Override
         public void onError(@NonNull CameraDevice camera, int error) {
-            Log.e(TAG, "cameraStateCallback.onError");
-        }
 
+            Log.e(TAG, "cameraStateCallback.onError");
+            stopSelf();
+        }
     };
 
     private void prepareForRecording() {
-
-        clearBuffers();
-
-        try {
-            prepareVideoCodec();
-            prepareAudioCodec();
-        } catch (IOException e) {
-            e.printStackTrace();
-            stopSelf();
-            return;
-        }
-        startGravitySensor();
-        notifyForeground();
-    }
-
-    private void clearBuffers() {
 
         videoFormat = null;
         audioFormat = null;
@@ -397,33 +367,42 @@ public class RecordService extends Service {
 
         videoDb.delete(EncodedVideoContract.Schema.TABLE_NAME, null, null);
         audioDb.delete(EncodedAudioContract.Schema.TABLE_NAME, null, null);
-    }
 
-    private void prepareVideoCodec() throws IOException {
+        try {
+            startVideoCodec();
+            startCamera();
 
-        if (cameraDevice == null) {
-            Log.e(TAG, "cameraDevice is null");
+            if (recordAudio) {
+                prepareAudioCodec();
+                startMicrophone();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
             stopSelf();
             return;
         }
+
+        startGravitySensor();
+        notifyForeground();
+    }
+
+    private void startVideoCodec() throws IOException {
 
         MediaFormat format = null;
         if (videoQuality == VideoQuality.HIGH_1080P) {
             format = MediaFormat.createVideoFormat("video/avc", 1920, 1080);
         } else if (videoQuality == VideoQuality.MED_720P) {
             format = MediaFormat.createVideoFormat("video/avc", 1280, 720);
-        }
-
-        if (format == null) {
+        } else {
             Log.e(TAG, "No suitable video resolution found.");
             stopSelf();
             return;
         }
 
         format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
-        format.setInteger(MediaFormat.KEY_BIT_RATE, 5000000);
+        format.setInteger(MediaFormat.KEY_BIT_RATE, 5_000_000);
         format.setString(MediaFormat.KEY_FRAME_RATE, null);
-        format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 0);
+        format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
 
         MediaCodecList codecList = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
         String codecName = codecList.findEncoderForFormat(format);
@@ -434,6 +413,15 @@ public class RecordService extends Service {
         videoCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
         videoInputSurface = videoCodec.createInputSurface();
         videoCodec.start();
+    }
+
+    private void startCamera() {
+
+        if (cameraDevice == null) {
+            Log.e(TAG, "cameraDevice is null");
+            stopSelf();
+            return;
+        }
 
         try {
             captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
@@ -460,18 +448,20 @@ public class RecordService extends Service {
                 session.setRepeatingRequest(captureRequestBuilder.build(), null, null);
             } catch (CameraAccessException e) {
                 e.printStackTrace();
+                stopSelf();
             }
         }
 
         @Override
         public void onConfigureFailed(@NonNull CameraCaptureSession session) {
             Log.e(TAG, "captureSessionStateCallback.onConfigureFailed");
+            stopSelf();
         }
 
         @Override
         public void onClosed(@NonNull CameraCaptureSession session) {
 
-            Log.d(TAG, "session.onClosed");
+            Log.d(TAG, "captureSessionStateCallback.onClosed");
             cameraStopped();
         }
     };
@@ -479,20 +469,21 @@ public class RecordService extends Service {
     private void prepareAudioCodec() throws IOException {
 
         MediaFormat format = MediaFormat.createAudioFormat("audio/mp4a-latm", audioSampleRate, 1);
-        format.setInteger(MediaFormat.KEY_BIT_RATE, 128000);
+        format.setInteger(MediaFormat.KEY_BIT_RATE, 128_000);
         MediaCodecList codecList = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
         String codecName = codecList.findEncoderForFormat(format);
 
         audioCodec = MediaCodec.createByCodecName(codecName);
         audioCodec.setCallback(audioCodecCallback);
         audioCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+    }
 
-        int minAudioBufferSize = AudioRecord.getMinBufferSize(
+    private void startMicrophone() {
+
+        int audioBufferSize = max(audioChunkBytes * 2, AudioRecord.getMinBufferSize(
                 audioSampleRate,
                 AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT);
-
-        int audioBufferSize = max(minAudioBufferSize, audioChunkBytes * 2);
+                AudioFormat.ENCODING_PCM_16BIT));
 
         audioRecord = new AudioRecord(
                 MediaRecorder.AudioSource.CAMCORDER,
@@ -530,12 +521,19 @@ public class RecordService extends Service {
                 calPtDiff = info.presentationTimeUs - Calendar.getInstance().getTimeInMillis() * 1000;
 
                 // Once video capture begins, start audio capture.
-                if (audioRecord.getState() == AudioRecord.STATE_INITIALIZED) {
+                if (recordAudio && audioRecord.getState() == AudioRecord.STATE_INITIALIZED) {
+                    Log.d(TAG, "Starting audio codec");
                     audioCodec.start();
                 }
             }
 
-            ByteBuffer outputBuffer = codec.getOutputBuffer(index);
+            ByteBuffer outputBuffer = null;
+            try {
+                outputBuffer = codec.getOutputBuffer(index);
+            } catch (IllegalStateException e) {
+                e.printStackTrace();
+                return;
+            }
 
             if (outputBuffer == null) {
                 return;
@@ -552,17 +550,6 @@ public class RecordService extends Service {
             videoBufferList.add(dataInfoPair);
 
             codec.releaseOutputBuffer(index, false);
-
-//            Log.d(TAG, "Frames: " + String.valueOf(videoBufferList.size()));
-
-            /*if (audioBufferList.size() > 0) {
-                Log.d(TAG, "min video pt: " + String.valueOf(videoBufferList.get(0).getBufferInfo().presentationTimeUs));
-                Log.d(TAG, "max video pt: " + String.valueOf(videoBufferList.get(videoBufferList.size() - 1).getBufferInfo().presentationTimeUs));
-                Log.d(TAG, "video del: " + String.valueOf(videoBufferList.get(videoBufferList.size() - 1).getBufferInfo().presentationTimeUs - videoBufferList.get(0).getBufferInfo().presentationTimeUs));
-                Log.d(TAG, "min audio pt: " + String.valueOf(audioBufferList.get(0).getBufferInfo().presentationTimeUs));
-                Log.d(TAG, "max audio pt: " + String.valueOf(audioBufferList.get(audioBufferList.size() - 1).getBufferInfo().presentationTimeUs));
-                Log.d(TAG, "audio del: " + String.valueOf(audioBufferList.get(audioBufferList.size() - 1).getBufferInfo().presentationTimeUs - audioBufferList.get(0).getBufferInfo().presentationTimeUs));
-            }*/
 
             // Discard old buffers
             if (videoBufferList.size() >= 2) {
@@ -598,48 +585,6 @@ public class RecordService extends Service {
         }
     };
 
-    private void discardOldBuffers() {
-
-        long minVideoTs = videoBufferList.get(videoBufferList.size() - 1).getBufferInfo().presentationTimeUs - recordDuration;
-        int minVideoIdx = 0;
-        for (int i = 0; i < videoBufferList.size(); i++) {
-
-            BufferDataInfoPair pair = videoBufferList.get(i);
-
-            if ((pair.getBufferInfo().presentationTimeUs > minVideoTs)
-                    && ((pair.getBufferInfo().flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) == MediaCodec.BUFFER_FLAG_KEY_FRAME)) {
-                minVideoIdx = i;
-                break;
-            }
-        }
-
-        long minVideoId = videoBufferList.get(minVideoIdx).getDataId();
-        long minPresentationTime = videoBufferList.get(minVideoIdx).getBufferInfo().presentationTimeUs;
-        videoDb.delete(
-                EncodedVideoContract.Schema.TABLE_NAME,
-                EncodedVideoContract.Schema._ID + " < ?",
-                new String[] { String.valueOf(minVideoId) }
-        );
-
-        int minAudioIdx = 0;
-        for (int i = 0; i < audioBufferList.size(); i++) {
-            if (audioBufferList.get(i).getBufferInfo().presentationTimeUs >= minPresentationTime) {
-                minAudioIdx = i;
-                break;
-            }
-        }
-
-        long minAudioId = audioBufferList.get(minAudioIdx).getDataId();
-        audioDb.delete(
-                EncodedAudioContract.Schema.TABLE_NAME,
-                EncodedAudioContract.Schema._ID + " < ?",
-                new String[] { String.valueOf(minAudioId) }
-        );
-
-        videoBufferList.subList(0, minVideoIdx).clear();
-        audioBufferList.subList(0, minAudioIdx).clear();
-    }
-
     private MediaCodec.Callback audioCodecCallback = new MediaCodec.Callback() {
 
         @Override
@@ -647,9 +592,16 @@ public class RecordService extends Service {
 
             switch (recordState) {
                 case STARTING:
+                    Log.e(TAG, "Audio input buffer dequeued when recordState = STARTING");
                     break;
                 case STARTED:
-                    ByteBuffer inputBuffer = codec.getInputBuffer(index);
+                    ByteBuffer inputBuffer = null;
+                    try {
+                        inputBuffer = codec.getInputBuffer(index);
+                    } catch (IllegalStateException e) {
+                        e.printStackTrace();
+                        return;
+                    }
 
                     if (inputBuffer == null) {
                         return;
@@ -672,7 +624,13 @@ public class RecordService extends Service {
                 return;
             }
 
-            ByteBuffer outputBuffer = codec.getOutputBuffer(index);
+            ByteBuffer outputBuffer = null;
+            try {
+                outputBuffer = codec.getOutputBuffer(index);
+            } catch (IllegalStateException e) {
+                e.printStackTrace();
+                return;
+            }
 
             if (outputBuffer == null) {
                 return;
@@ -708,6 +666,51 @@ public class RecordService extends Service {
         }
     };
 
+    private void discardOldBuffers() {
+
+        long minPresentationTime = videoBufferList.get(videoBufferList.size() - 1).getBufferInfo().presentationTimeUs - recordDuration;
+        int minVideoIdx = 0;
+        for (int i = 0; i < videoBufferList.size(); i++) {
+
+            BufferDataInfoPair pair = videoBufferList.get(i);
+
+            if ((pair.getBufferInfo().presentationTimeUs > minPresentationTime)
+                    && ((pair.getBufferInfo().flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) == MediaCodec.BUFFER_FLAG_KEY_FRAME)) {
+                minVideoIdx = i;
+                break;
+            }
+        }
+
+        videoBufferList.subList(0, minVideoIdx).clear();
+
+        long minVideoId = videoBufferList.get(minVideoIdx).getDataId();
+        videoDb.delete(
+                EncodedVideoContract.Schema.TABLE_NAME,
+                EncodedVideoContract.Schema._ID + " < ?",
+                new String[] { String.valueOf(minVideoId) }
+        );
+
+        if (audioBufferList.size() > 0) {
+
+            int minAudioIdx = 0;
+            for (int i = 0; i < audioBufferList.size(); i++) {
+                if (audioBufferList.get(i).getBufferInfo().presentationTimeUs >= minPresentationTime) {
+                    minAudioIdx = i;
+                    break;
+                }
+            }
+
+            audioBufferList.subList(0, minAudioIdx).clear();
+
+            long minAudioId = audioBufferList.get(minAudioIdx).getDataId();
+            audioDb.delete(
+                    EncodedAudioContract.Schema.TABLE_NAME,
+                    EncodedAudioContract.Schema._ID + " < ?",
+                    new String[]{String.valueOf(minAudioId)}
+            );
+        }
+    }
+
     private void startGravitySensor() {
 
         SensorManager sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
@@ -731,25 +734,16 @@ public class RecordService extends Service {
             Log.d(TAG, "tad: " + String.valueOf(timeAxisDown));
             Log.d(TAG, "diff: " + String.valueOf(event.timestamp - timeAxisDown));*/
 
-            double gThreshold;
-            if (tipoverThreshold.equals(TipoverThreshold.LOW)) {
-                gThreshold = G_THRESHOLD_LOW;
-            } else if (tipoverThreshold.equals(TipoverThreshold.MEDIUM)) {
-                gThreshold = G_THRESHOLD_MEDIUM;
-            } else {
-                gThreshold = G_THRESHOLD_HIGH;
-            }
-
             if (orientationLocked) {
 
                 if ((downAxis == DownAxis.X_POS && event.values[0] < gThreshold)
                         || (downAxis == DownAxis.X_NEG && event.values[0] > -gThreshold)
                         || (downAxis == DownAxis.Y_POS && event.values[1] < gThreshold)
-                        || (downAxis == DownAxis.Y_NEG && event.values[1] > -gThreshold)) {
+                        || (downAxis == DownAxis.Y_NEG && event.values[1] > -gThreshold)) { /* tipped */
 
-                    if (! lockedButTipped) {
+                    if (!tippedButLocked) { /* one-time tipover callback */
 
-                        lockedButTipped = true;
+                        tippedButLocked = true;
 
                         if (onTipoverCallback != null) {
                             onTipoverCallback.onTipover();
@@ -762,11 +756,12 @@ public class RecordService extends Service {
                             stopRecording();
                         }
                         orientationLocked = false;
-                        lockedButTipped = false;
+                        tippedButLocked = false;
                         downAxis = DownAxis.NONE;
                     }
-                } else {
-                    lockedButTipped = false;
+                } else { /* not tipped */
+
+                    tippedButLocked = false;
                     timeTipped = event.timestamp;
                 }
             } else {
@@ -837,14 +832,6 @@ public class RecordService extends Service {
         startForeground(ONGOING_NOTIFICATION_ID, notification);
     }
 
-    private void resetOrientation() {
-        downAxis = DownAxis.NONE;
-        timeAxisDown = 0;
-        timeTipped = 0;
-        orientationLocked = false;
-        lockedButTipped = false;
-    }
-
     RecordState getRecordState() {
         return recordState;
     }
@@ -852,11 +839,11 @@ public class RecordService extends Service {
     void stopRecording() {
 
         Log.d(TAG, "stopRecording");
-        Log.d(TAG, String.valueOf(recordState));
 
         if (recordState.equals(RecordState.STARTED)) {
 
             recordState = RecordState.STOPPING;
+            videoCodec.signalEndOfInputStream();
 
             try {
                 cameraCaptureSession.abortCaptures();
@@ -872,12 +859,20 @@ public class RecordService extends Service {
 
         Log.d(TAG, "cameraStopped");
 
-        videoCodec.signalEndOfInputStream();
+        if (recordState.equals(RecordState.STARTED)) {
 
-        if (audioRecord.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) {
-            audioRecord.stop();
-            audioRecord.release();
+            recordState = RecordState.STOPPING;
+            videoCodec.signalEndOfInputStream();
         }
+
+        if (audioRecord != null
+                && audioRecord.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) {
+
+            audioRecord.stop();
+        }
+
+        SensorManager sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        sensorManager.unregisterListener(sensorEventListener);
 
         if (saveLocation
                 && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -890,16 +885,14 @@ public class RecordService extends Service {
 
         boolean saved = dumpBuffersToFile();
 
-        releaseResources();
-
-        recordState = RecordState.STOPPED;
-
-        stopForeground(true);
+//        releaseResources();
 
         if (onStopRecordCallback != null) {
             onStopRecordCallback.onStopRecord();
         }
 
+        recordState = RecordState.STOPPED;
+        stopForeground(true);
         stopSelf();
     }
 
@@ -911,12 +904,17 @@ public class RecordService extends Service {
                 && ActivityCompat.checkSelfPermission(RecordService.this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
 
             externalFile = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "test.mp4");
+            String filePath = externalFile.getAbsolutePath();
 
-            MediaMuxer mediaMuxer = null;
             try {
                 externalFile.delete();
                 externalFile.createNewFile();
-                String filePath = externalFile.getAbsolutePath();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+
+            MediaMuxer mediaMuxer = null;
+            try {
                 mediaMuxer = new MediaMuxer(filePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
             } catch (IOException e) {
                 e.printStackTrace();
@@ -927,14 +925,14 @@ public class RecordService extends Service {
             int videoTrackIdx = mediaMuxer.addTrack(videoFormat);
 
             int audioTrackIdx = -1;
-            if (recordAudio) {
+            if (recordAudio && audioFormat != null) {
                 audioTrackIdx = mediaMuxer.addTrack(audioFormat);
             }
 
             if (location != null) {
                 mediaMuxer.setLocation((float) location.getLatitude(), (float) location.getLongitude());
-                Log.d(TAG, "lat: " + String.valueOf(location.getLatitude()));
-                Log.d(TAG, "long: " + String.valueOf(location.getLongitude()));
+//                Log.d(TAG, "latitude: " + String.valueOf(location.getLatitude()));
+//                Log.d(TAG, "longitude: " + String.valueOf(location.getLongitude()));
             }
 
             mediaMuxer.setOrientationHint(sensorOrientation);
@@ -969,16 +967,9 @@ public class RecordService extends Service {
                 cursor.close();
 
                 mediaMuxer.writeSampleData(videoTrackIdx, buffer, info);
-
-                /*Log.d(TAG, "offset:" + String.valueOf(info.offset) +
-                        " size:" + String.valueOf(info.size) +
-                        " pt:" + String.valueOf(info.presentationTimeUs) +
-                        " codec config:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) +
-                        " keyframe:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) +
-                        " EOS:" + String.valueOf(info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM));*/
             }
 
-            if (recordAudio) {
+            if (recordAudio && audioTrackIdx != -1) {
 
                 latestPt = 0;
                 for (BufferDataInfoPair dataInfoPair : audioBufferList) {
@@ -1071,7 +1062,6 @@ public class RecordService extends Service {
                 return;
             }
 
-
             MetadataChangeSet changeSet = new MetadataChangeSet.Builder()
                     .setTitle("Test Recording.mp4")
                     .setMimeType("video/mp4").build();
@@ -1092,17 +1082,25 @@ public class RecordService extends Service {
 
     private void releaseResources() {
 
-        videoCodec.stop();
-        videoCodec.release();
-        videoInputSurface.release();
+        if (videoCodec != null) {
+            videoCodec.release();
+        }
+        if (videoInputSurface != null) {
+            videoInputSurface.release();
+        }
+        if (cameraDevice != null) {
+            cameraDevice.close();
+        }
 
-        audioCodec.stop();
-        audioCodec.release();
+        if (audioCodec != null) {
+            audioCodec.release();
+        }
+        if (audioRecord != null) {
+            audioRecord.release();
+        }
 
-        cameraDevice.close();
-
-        SensorManager sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
-        sensorManager.unregisterListener(sensorEventListener);
+        videoDb.close();
+        audioDb.close();
     }
 
     public static void setRecordDuration(int recordDuration) {
@@ -1127,22 +1125,20 @@ public class RecordService extends Service {
     public static void setTipoverThreshold(String pref, String low, String medium, String high) {
         Log.d(TAG, "setTipoverThreshold: " + pref);
         if (pref.equals(low)) {
-            RecordService.tipoverThreshold = TipoverThreshold.LOW;
+//            RecordService.tipoverThreshold = TipoverThreshold.LOW;
+            gThreshold = G_THRESHOLD_LOW;
         } else if (pref.equals(medium)) {
-            RecordService.tipoverThreshold = TipoverThreshold.MEDIUM;
+//            RecordService.tipoverThreshold = TipoverThreshold.MEDIUM;
+            gThreshold = G_THRESHOLD_MEDIUM;
         } else if (pref.equals(high)) {
-            RecordService.tipoverThreshold = TipoverThreshold.HIGH;
+//            RecordService.tipoverThreshold = TipoverThreshold.HIGH;
+            gThreshold = G_THRESHOLD_HIGH;
         }
     }
 
     public static void setTipoverTimeout(int tipoverTimeout) {
         Log.d(TAG, "setTipoverTimeout: " + String.valueOf(tipoverTimeout));
         RecordService.tipoverTimeout = tipoverTimeout * 1_000_000_000;
-    }
-
-    public static void setRecordAudio(boolean recordAudio) {
-        Log.d(TAG, "setRecordAudio: " + String.valueOf(recordAudio));
-        RecordService.recordAudio = recordAudio;
     }
 
     public static void setSaveLocation(boolean saveLocation) {

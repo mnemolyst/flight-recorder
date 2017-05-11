@@ -38,8 +38,6 @@
     </string-array>
     <string name="pref_video_quality_default">@string/pref_video_quality_1080p</string>
 
-    <string name="pref_audio_title">Record audio</string>
-
     <string name="pref_cat_saving">Saving</string>
 
     <string name="pref_save_on_tipover_title">Save recording on tipover</string>
@@ -78,5 +76,8 @@
     <string name="about_text">
         Copyright &#x00A9; 2017 by Joshua Salisbury\n\n<b>No warranty is given for this product, not even an implied warranty of fitness for a particular purpose.</b>
     </string>
+
+    <string name="camera_permission_note">Camera permission is required for operation.</string>
+    <string name="storage_permission_note">External Storage permission is required for operation.</string>
 
 </resources>

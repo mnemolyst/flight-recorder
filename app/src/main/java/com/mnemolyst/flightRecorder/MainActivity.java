@@ -14,6 +14,7 @@ import android.os.IBinder;
 import android.preference.PreferenceManager;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.design.widget.Snackbar;
 import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
@@ -25,7 +26,6 @@ import android.widget.Toast;
 
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GoogleApiAvailability;
-import com.google.android.gms.common.GooglePlayServicesUtil;
 import com.google.android.gms.common.api.GoogleApiClient;
 import com.google.android.gms.drive.Drive;
 import com.google.android.gms.location.LocationServices;
@@ -45,7 +45,7 @@ import java.util.ArrayList;
 public class MainActivity extends AppCompatActivity implements GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener {
 
     final static String TAG = "MainActivity";
-    private final static int PERM_REQUEST_CAMERA_STORAGE = 1;
+    private final static int PERM_REQUEST_INITIAL = 1;
 
     static GoogleApiClient googleApiClient;
 
@@ -66,39 +66,6 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
             recordService.registerOnOrientationLockedCallback(onOrientationLockedCallback);
             recordService.registerOnTipoverCallback(onTipoverCallback);
             recordService.registerOnStopRecordCallback(onStopRecordCallback);
-
-            // Get available output resolutions
-            /*CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
-
-            try {
-                String[] cameraIdList = cameraManager.getCameraIdList();
-                for (String id : cameraIdList) {
-
-                    CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(id);
-                    if (characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK) {
-
-                        recordService.setCameraId(id);
-                        *//*StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-                        Size[] outputSizes = map.getOutputSizes(MediaCodec.class);
-
-                        availableVideoQualities = new ArrayList<>();
-                        for (Size s : outputSizes) {
-                            if (s.getWidth() == 1920 && s.getHeight() == 1080) {
-                                availableVideoQualities.add(getResources().getString(R.string.pref_video_quality_1080p));
-                            } else if (s.getWidth() == 1280 && s.getHeight() == 720) {
-                                availableVideoQualities.add(getResources().getString(R.string.pref_video_quality_720p));
-                            }
-                        }*//*
-
-                        break;
-                    }
-                }
-            } catch (CameraAccessException e) {
-                e.printStackTrace();
-            }
-
-            SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(MainActivity.this);
-            PreferenceActivity.updateServiceFromPrefs(sharedPreferences, getResources());*/
         }
 
         @Override
@@ -155,7 +122,7 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
                     SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
                     SharedPreferences.Editor editor = sharedPreferences.edit();
                     editor.putBoolean(PreferenceActivity.KEY_PREF_BACKUP, false);
-                    editor.commit();
+                    editor.apply();
                 }
                 break;
         }
@@ -189,31 +156,45 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
 
         void onStopRecord() {
 
-            unbindService(serviceConnection);
-            recordService = null;
 //            btnRecord.setText(R.string.start_button);
         }
     };
 
     private void toggleRecording() {
 
-        if (recordService == null) {
+        if (recordService != null && recordService.getRecordState().equals(RecordService.RecordState.STOPPED)) {
 
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED
-                    || ActivityCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-
-                ActivityCompat.requestPermissions(this, new String[] {
-                        Manifest.permission.CAMERA,
-                        Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                }, PERM_REQUEST_CAMERA_STORAGE);
-
-                return;
+            if (getPermissions()) {
+                startRecording();
             }
-
-            startRecording();
         } else {
 
             recordService.stopRecording();
+        }
+    }
+
+    private boolean getPermissions() {
+
+        ArrayList<String> permissions = new ArrayList<>();
+
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            permissions.add(Manifest.permission.CAMERA);
+        }
+
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+        }
+
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
+                && ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.RECORD_AUDIO)) {
+            permissions.add(Manifest.permission.RECORD_AUDIO);
+        }
+
+        if (permissions.isEmpty()) {
+            return true;
+        } else {
+            ActivityCompat.requestPermissions(this, permissions.toArray(new String[0]), PERM_REQUEST_INITIAL);
+            return false;
         }
     }
 
@@ -221,16 +202,18 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
 
         Intent intent = new Intent(this, RecordService.class);
         startService(intent);
-        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
     }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
 
+        Log.d(TAG, "onCreate");
+
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         Toolbar myToolbar = (Toolbar) findViewById(R.id.main_toolbar);
         setSupportActionBar(myToolbar);
+
 
         if (googleApiClient == null
                 || !(googleApiClient.isConnected() || googleApiClient.isConnecting())) {
@@ -262,14 +245,14 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
         boolean worthIt = false;
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(activity);
 
-        if (sharedPreferences.getBoolean(PreferenceActivity.KEY_PREF_BACKUP, false)) {
-            Log.d(TAG, "Adding Drive API");
-            builder.addApi(Drive.API).addScope(Drive.SCOPE_FILE);
-            worthIt = true;
-        }
         if (sharedPreferences.getBoolean(PreferenceActivity.KEY_PREF_LOCATION, false)) {
             Log.d(TAG, "Adding Location API");
             builder.addApi(LocationServices.API);
+            worthIt = true;
+        }
+        if (sharedPreferences.getBoolean(PreferenceActivity.KEY_PREF_BACKUP, false)) {
+            Log.d(TAG, "Adding Drive API");
+            builder.addApi(Drive.API).addScope(Drive.SCOPE_FILE);
             worthIt = true;
         }
         if (worthIt) {
@@ -282,6 +265,8 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
     public void onStart() {
 
         Log.d(TAG, "onStart");
+        Intent intent = new Intent(this, RecordService.class);
+        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
         super.onStart();
     }
 
@@ -296,6 +281,7 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
     public void onStop() {
 
         Log.d(TAG, "onStop");
+        unbindService(serviceConnection);
         super.onStop();
     }
 
@@ -303,8 +289,6 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
     public void onDestroy() {
 
         Log.d(TAG, "onDestroy");
-
-//        unbindService(serviceConnection);
         super.onDestroy();
     }
 
@@ -360,14 +344,34 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
 
         switch (requestCode) {
 
-            case PERM_REQUEST_CAMERA_STORAGE: {
+            case PERM_REQUEST_INITIAL: {
+                boolean haveCamera = true;
+                boolean haveStorage = true;
 
-                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                for (int i = 0; i < permissions.length; i++) {
+                    switch (permissions[i]) {
+                        case Manifest.permission.CAMERA:
+                            haveCamera = grantResults[i] == PackageManager.PERMISSION_GRANTED;
+                            break;
+                        case Manifest.permission.WRITE_EXTERNAL_STORAGE:
+                            haveStorage = grantResults[i] == PackageManager.PERMISSION_GRANTED;
+                            break;
+                    }
+                }
+
+                if (haveCamera && haveStorage) {
 
                     startRecording();
                 } else {
 
-                    Log.d(TAG, "Camera permission denied!");
+                    if (ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.CAMERA)) {
+                        Snackbar snackbar = Snackbar.make(findViewById(R.id.coordinator_layout), R.string.camera_permission_note, Snackbar.LENGTH_LONG);
+                        snackbar.show();
+                    }
+                    if (ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
+                        Snackbar snackbar = Snackbar.make(findViewById(R.id.coordinator_layout), R.string.storage_permission_note, Snackbar.LENGTH_LONG);
+                        snackbar.show();
+                    }
                 }
             }
         }

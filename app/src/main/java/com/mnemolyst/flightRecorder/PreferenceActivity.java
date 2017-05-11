@@ -42,12 +42,10 @@ public class PreferenceActivity extends AppCompatActivity implements GoogleApiCl
     static final String KEY_PREF_TIPOVER = "pref_tipover";
     static final String KEY_PREF_TIPOVER_THRESHOLD = "pref_tipover_threshold";
     static final String KEY_PREF_TIPOVER_TIMEOUT = "pref_tipover_timeout";
-    static final String KEY_PREF_AUDIO = "pref_audio";
     static final String KEY_PREF_LOCATION = "pref_location";
     static final String KEY_PREF_BACKUP = "pref_backup";
 
-    private static final int PERM_REQUEST_AUDIO = 2;
-    private static final int PERM_REQUEST_LOCATION = 3;
+    private static final int PERM_REQUEST_LOCATION = 2;
     private SettingsFragment settingsFragment;
 
     public static class SettingsFragment extends PreferenceFragment {
@@ -131,10 +129,6 @@ public class PreferenceActivity extends AppCompatActivity implements GoogleApiCl
         super.onResume();
         settingsFragment.getPreferenceScreen().getSharedPreferences().registerOnSharedPreferenceChangeListener(this);
 
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_DENIED) {
-            CheckBoxPreference preference = (CheckBoxPreference) settingsFragment.findPreference(KEY_PREF_AUDIO);
-            preference.setChecked(false);
-        }
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_DENIED) {
             CheckBoxPreference preference = (CheckBoxPreference) settingsFragment.findPreference(KEY_PREF_LOCATION);
             preference.setChecked(false);
@@ -173,8 +167,6 @@ public class PreferenceActivity extends AppCompatActivity implements GoogleApiCl
         prefDefault = resources.getString(R.string.pref_video_quality_default);
         RecordService.setVideoQuality(sharedPreferences.getString(KEY_PREF_VIDEO_QUALITY, prefDefault), prefOpt1, prefOpt2);
 
-        RecordService.setRecordAudio(sharedPreferences.getBoolean(KEY_PREF_AUDIO, true));
-
         RecordService.setSaveOnTipover(sharedPreferences.getBoolean(KEY_PREF_TIPOVER, true));
 
         prefOpt1 = resources.getString(R.string.pref_tipover_threshold_low);
@@ -198,17 +190,6 @@ public class PreferenceActivity extends AppCompatActivity implements GoogleApiCl
         }
 
         switch (key) {
-            case KEY_PREF_AUDIO:
-                if (sharedPreferences.getBoolean(key, true)) {
-                    if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                        RecordService.setRecordAudio(true);
-                    } else {
-                        ActivityCompat.requestPermissions(this, new String[] { Manifest.permission.RECORD_AUDIO }, PERM_REQUEST_AUDIO);
-                    }
-                } else {
-                    RecordService.setRecordAudio(false);
-                }
-                break;
             case KEY_PREF_LOCATION:
                 if (sharedPreferences.getBoolean(key, false)) {
                     if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
@@ -246,14 +227,6 @@ public class PreferenceActivity extends AppCompatActivity implements GoogleApiCl
     public void onRequestPermissionsResult(int requestCode, @NonNull String permissions[], @NonNull int[] grantResults) {
 
         switch (requestCode) {
-            case PERM_REQUEST_AUDIO:
-                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                    RecordService.setRecordAudio(true);
-                } else {
-                    CheckBoxPreference preference = (CheckBoxPreference) settingsFragment.findPreference(KEY_PREF_AUDIO);
-                    preference.setChecked(false);
-                }
-                break;
             case PERM_REQUEST_LOCATION:
                 if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                     RecordService.setSaveLocation(true);
