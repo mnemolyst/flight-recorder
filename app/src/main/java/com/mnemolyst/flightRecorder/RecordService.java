@@ -57,6 +57,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import android.text.format.DateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
@@ -106,7 +107,7 @@ public class RecordService extends Service {
     private MediaFormat audioFormat;
     private ArrayList<BufferDataInfoPair> videoBufferList = new ArrayList<>();
     private ArrayList<BufferDataInfoPair> audioBufferList = new ArrayList<>();
-    private File externalFile;
+    private File internalFile;
 
     private boolean recordAudio = true;
     private AudioRecord audioRecord;
@@ -898,49 +899,78 @@ public class RecordService extends Service {
 
     private boolean dumpBuffersToFile() {
 
-        String state = Environment.getExternalStorageState();
+        String formattedDate = (String) DateFormat.format("yyyy-MM-dd HH:mm", Calendar.getInstance());
 
-        if (Environment.MEDIA_MOUNTED.equals(state)
-                && ActivityCompat.checkSelfPermission(RecordService.this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
+        internalFile = new File(getApplicationContext().getFilesDir(), formattedDate + ".mp4");
+        String filePath = internalFile.getAbsolutePath();
 
-            externalFile = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "test.mp4");
-            String filePath = externalFile.getAbsolutePath();
+        /*try {
+            internalFile.delete();
+            internalFile.createNewFile();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }*/
 
-            try {
-                externalFile.delete();
-                externalFile.createNewFile();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
+        MediaMuxer mediaMuxer = null;
+        try {
+            mediaMuxer = new MediaMuxer(filePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+        } catch (IOException e) {
+            e.printStackTrace();
+            stopSelf();
+            return false;
+        }
 
-            MediaMuxer mediaMuxer = null;
-            try {
-                mediaMuxer = new MediaMuxer(filePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
-            } catch (IOException e) {
-                e.printStackTrace();
-                stopSelf();
-                return false;
-            }
+        int videoTrackIdx = mediaMuxer.addTrack(videoFormat);
 
-            int videoTrackIdx = mediaMuxer.addTrack(videoFormat);
+        int audioTrackIdx = -1;
+        if (recordAudio && audioFormat != null) {
+            audioTrackIdx = mediaMuxer.addTrack(audioFormat);
+        }
 
-            int audioTrackIdx = -1;
-            if (recordAudio && audioFormat != null) {
-                audioTrackIdx = mediaMuxer.addTrack(audioFormat);
-            }
-
-            if (location != null) {
-                mediaMuxer.setLocation((float) location.getLatitude(), (float) location.getLongitude());
+        if (location != null) {
+            mediaMuxer.setLocation((float) location.getLatitude(), (float) location.getLongitude());
 //                Log.d(TAG, "latitude: " + String.valueOf(location.getLatitude()));
 //                Log.d(TAG, "longitude: " + String.valueOf(location.getLongitude()));
+        }
+
+        mediaMuxer.setOrientationHint(sensorOrientation);
+
+        mediaMuxer.start();
+
+        long latestPt = 0;
+        for (BufferDataInfoPair dataInfoPair : videoBufferList) {
+
+            long bufferId = dataInfoPair.getDataId();
+            MediaCodec.BufferInfo info = dataInfoPair.getBufferInfo();
+            if (info.presentationTimeUs > latestPt) {
+                latestPt = info.presentationTimeUs;
+            } else {
+                continue;
             }
 
-            mediaMuxer.setOrientationHint(sensorOrientation);
+            Cursor cursor = videoDb.query(EncodedVideoContract.Schema.TABLE_NAME,
+                    null,
+                    EncodedVideoContract.Schema._ID + " = " + String.valueOf(bufferId),
+                    null, null, null,
+                    EncodedVideoContract.Schema._ID + " ASC");
 
-            mediaMuxer.start();
+            if (! cursor.moveToFirst()) {
+                continue;
+            }
 
-            long latestPt = 0;
-            for (BufferDataInfoPair dataInfoPair : videoBufferList) {
+            ByteBuffer buffer = ByteBuffer.wrap(cursor.getBlob(
+                    cursor.getColumnIndex(EncodedVideoContract.Schema.VIDEO_DATA_COLUMN_NAME)
+            ));
+
+            cursor.close();
+
+            mediaMuxer.writeSampleData(videoTrackIdx, buffer, info);
+        }
+
+        if (recordAudio && audioTrackIdx != -1) {
+
+            latestPt = 0;
+            for (BufferDataInfoPair dataInfoPair : audioBufferList) {
 
                 long bufferId = dataInfoPair.getDataId();
                 MediaCodec.BufferInfo info = dataInfoPair.getBufferInfo();
@@ -950,65 +980,33 @@ public class RecordService extends Service {
                     continue;
                 }
 
-                Cursor cursor = videoDb.query(EncodedVideoContract.Schema.TABLE_NAME,
+                Cursor cursor = audioDb.query(EncodedAudioContract.Schema.TABLE_NAME,
                         null,
-                        EncodedVideoContract.Schema._ID + " = " + String.valueOf(bufferId),
+                        EncodedAudioContract.Schema._ID + " = " + String.valueOf(bufferId),
                         null, null, null,
-                        EncodedVideoContract.Schema._ID + " ASC");
+                        EncodedAudioContract.Schema._ID + " ASC");
 
-                if (! cursor.moveToFirst()) {
+                if (!cursor.moveToFirst()) {
                     continue;
                 }
 
                 ByteBuffer buffer = ByteBuffer.wrap(cursor.getBlob(
-                        cursor.getColumnIndex(EncodedVideoContract.Schema.VIDEO_DATA_COLUMN_NAME)
+                        cursor.getColumnIndex(EncodedAudioContract.Schema.AUDIO_DATA_COLUMN_NAME)
                 ));
 
                 cursor.close();
 
-                mediaMuxer.writeSampleData(videoTrackIdx, buffer, info);
+                mediaMuxer.writeSampleData(audioTrackIdx, buffer, info);
             }
+        }
 
-            if (recordAudio && audioTrackIdx != -1) {
+        mediaMuxer.stop();
+        mediaMuxer.release();
 
-                latestPt = 0;
-                for (BufferDataInfoPair dataInfoPair : audioBufferList) {
+        SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
 
-                    long bufferId = dataInfoPair.getDataId();
-                    MediaCodec.BufferInfo info = dataInfoPair.getBufferInfo();
-                    if (info.presentationTimeUs > latestPt) {
-                        latestPt = info.presentationTimeUs;
-                    } else {
-                        continue;
-                    }
-
-                    Cursor cursor = audioDb.query(EncodedAudioContract.Schema.TABLE_NAME,
-                            null,
-                            EncodedAudioContract.Schema._ID + " = " + String.valueOf(bufferId),
-                            null, null, null,
-                            EncodedAudioContract.Schema._ID + " ASC");
-
-                    if (!cursor.moveToFirst()) {
-                        continue;
-                    }
-
-                    ByteBuffer buffer = ByteBuffer.wrap(cursor.getBlob(
-                            cursor.getColumnIndex(EncodedAudioContract.Schema.AUDIO_DATA_COLUMN_NAME)
-                    ));
-
-                    cursor.close();
-
-                    mediaMuxer.writeSampleData(audioTrackIdx, buffer, info);
-                }
-            }
-
-            mediaMuxer.stop();
-            mediaMuxer.release();
-
-            SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
-
-            if (sharedPreferences.getBoolean(PreferenceActivity.KEY_PREF_BACKUP, false)
-                    && MainActivity.hasDriveApi()) {
+        if (sharedPreferences.getBoolean(PreferenceActivity.KEY_PREF_BACKUP, false)
+                && MainActivity.hasDriveApi()) {
 
                 /*String folderId = sharedPreferences.getString(KEY_DRIVE_FOLDER_ID, null);
                 DriveId driveId = null;
@@ -1025,15 +1023,10 @@ public class RecordService extends Service {
                 Drive.DriveApi.getRootFolder(MainActivity.googleApiClient).createFolder(
                         MainActivity.googleApiClient, changeSet).setResultCallback(folderCreatedCallback);*/
 
-                Drive.DriveApi.newDriveContents(MainActivity.googleApiClient).setResultCallback(driveContentsResultCallback);
-            }
-
-            return true;
-        } else {
-            Log.e(TAG, "External media unavailable: " + state);
-
-            return false;
+            Drive.DriveApi.newDriveContents(MainActivity.googleApiClient).setResultCallback(driveContentsResultCallback);
         }
+
+        return true;
     }
 
     private ResultCallback<DriveApi.DriveContentsResult> driveContentsResultCallback = new ResultCallback<DriveApi.DriveContentsResult>() {
@@ -1046,7 +1039,7 @@ public class RecordService extends Service {
             DriveContents driveContents = driveContentsResult.getDriveContents();
 
             try {
-                FileInputStream fileInputStream = new FileInputStream(externalFile);
+                FileInputStream fileInputStream = new FileInputStream(internalFile);
                 OutputStream outputStream = driveContents.getOutputStream();
 
                 byte[] buffer = new byte[1024 * 10];

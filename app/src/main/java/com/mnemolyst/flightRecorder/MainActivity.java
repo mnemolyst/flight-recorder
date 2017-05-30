@@ -22,6 +22,8 @@ import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
+import android.widget.ArrayAdapter;
+import android.widget.ListView;
 import android.widget.Toast;
 
 import com.google.android.gms.common.ConnectionResult;
@@ -30,7 +32,10 @@ import com.google.android.gms.common.api.GoogleApiClient;
 import com.google.android.gms.drive.Drive;
 import com.google.android.gms.location.LocationServices;
 
+import java.io.File;
+import java.io.FilenameFilter;
 import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Created by joshua on 4/10/17.
@@ -51,6 +56,9 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
 
     private RecordService recordService = null;
     private ArrayList<String> availableVideoQualities = new ArrayList<>();
+
+    private ArrayList<String> filenameList = new ArrayList<String>();
+    private ArrayAdapter<String> arrayAdapter;
 
     private ServiceConnection serviceConnection = new ServiceConnection() {
 
@@ -156,7 +164,10 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
 
         void onStopRecord() {
 
-//            btnRecord.setText(R.string.start_button);
+            Log.d(TAG, "onStopRecord");
+            unbindService(serviceConnection);
+            populateSavedFileList();
+            arrayAdapter.notifyDataSetChanged();
         }
     };
 
@@ -181,9 +192,9 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
             permissions.add(Manifest.permission.CAMERA);
         }
 
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+        /*if (ActivityCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
-        }
+        }*/
 
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
                 && ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.RECORD_AUDIO)) {
@@ -204,6 +215,23 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
         startService(intent);
     }
 
+    private FilenameFilter mp4Filter = new FilenameFilter() {
+        @Override
+        public boolean accept(File dir, String name) {
+            return name.substring(name.length() - 4).equals(".mp4");
+        }
+    };
+
+    private void populateSavedFileList() {
+
+        String[] list = this.getFilesDir().list(mp4Filter);
+
+        filenameList.clear();
+        for (String f : list) {
+            filenameList.add(f);
+        }
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
 
@@ -214,6 +242,10 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
         Toolbar myToolbar = (Toolbar) findViewById(R.id.main_toolbar);
         setSupportActionBar(myToolbar);
 
+        populateSavedFileList();
+        arrayAdapter = new ArrayAdapter<>(this, R.layout.simple_filename_list_item, filenameList);
+        ListView listView = (ListView) findViewById(R.id.filename_list);
+        listView.setAdapter(arrayAdapter);
 
         if (googleApiClient == null
                 || !(googleApiClient.isConnected() || googleApiClient.isConnecting())) {
@@ -334,6 +366,13 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
                 intent = new Intent(MainActivity.this, AboutActivity.class);
                 startActivity(intent);
                 return true;
+            case R.id.clearVideos:
+                for (File file : this.getFilesDir().listFiles(mp4Filter)) {
+                    Log.d(TAG, file.getName());
+                    Log.d(TAG, String.valueOf(file.delete()));
+                }
+                populateSavedFileList();
+                arrayAdapter.notifyDataSetChanged();
             default:
                 return super.onOptionsItemSelected(menuItem);
         }
@@ -346,20 +385,20 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
 
             case PERM_REQUEST_INITIAL: {
                 boolean haveCamera = true;
-                boolean haveStorage = true;
+//                boolean haveStorage = true;
 
                 for (int i = 0; i < permissions.length; i++) {
                     switch (permissions[i]) {
                         case Manifest.permission.CAMERA:
                             haveCamera = grantResults[i] == PackageManager.PERMISSION_GRANTED;
                             break;
-                        case Manifest.permission.WRITE_EXTERNAL_STORAGE:
+                        /*case Manifest.permission.WRITE_EXTERNAL_STORAGE:
                             haveStorage = grantResults[i] == PackageManager.PERMISSION_GRANTED;
-                            break;
+                            break;*/
                     }
                 }
 
-                if (haveCamera && haveStorage) {
+                if (haveCamera) { // && haveStorage) {
 
                     startRecording();
                 } else {
@@ -368,10 +407,10 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
                         Snackbar snackbar = Snackbar.make(findViewById(R.id.coordinator_layout), R.string.camera_permission_note, Snackbar.LENGTH_LONG);
                         snackbar.show();
                     }
-                    if (ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
+                    /*if (ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
                         Snackbar snackbar = Snackbar.make(findViewById(R.id.coordinator_layout), R.string.storage_permission_note, Snackbar.LENGTH_LONG);
                         snackbar.show();
-                    }
+                    }*/
                 }
             }
         }
