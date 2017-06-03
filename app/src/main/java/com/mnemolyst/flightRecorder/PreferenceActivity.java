@@ -112,6 +112,7 @@ public class PreferenceActivity extends AppCompatActivity implements GoogleApiCl
 
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_preference);
+
         Toolbar toolbar = (Toolbar) findViewById(R.id.pref_toolbar);
         setSupportActionBar(toolbar);
         ActionBar actionBar = getSupportActionBar();

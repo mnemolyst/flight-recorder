@@ -34,8 +34,9 @@ import com.google.android.gms.location.LocationServices;
 
 import java.io.File;
 import java.io.FilenameFilter;
+import java.text.DateFormat;
 import java.util.ArrayList;
-import java.util.List;
+import java.util.Date;
 
 /**
  * Created by joshua on 4/10/17.
@@ -140,7 +141,8 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
         @Override
         void onStartRecord() {
 
-//            btnRecord.setText(R.string.stop_button);
+            Log.d(TAG, "onStartRecordCallback");
+            Log.d(TAG, recordService.getRecordState().toString());
         }
     };
 
@@ -165,13 +167,15 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
         void onStopRecord() {
 
             Log.d(TAG, "onStopRecord");
-            unbindService(serviceConnection);
             populateSavedFileList();
             arrayAdapter.notifyDataSetChanged();
         }
     };
 
     private void toggleRecording() {
+        if (recordService != null) {
+            Log.d(TAG, recordService.getRecordState().toString());
+        }
 
         if (recordService != null && recordService.getRecordState().equals(RecordService.RecordState.STOPPED)) {
 
@@ -186,25 +190,25 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
 
     private boolean getPermissions() {
 
-        ArrayList<String> permissions = new ArrayList<>();
+        ArrayList<String> neededPermissions = new ArrayList<>();
 
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            permissions.add(Manifest.permission.CAMERA);
+            neededPermissions.add(Manifest.permission.CAMERA);
         }
 
         /*if (ActivityCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-            permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+            neededPermissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
         }*/
 
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
                 && ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.RECORD_AUDIO)) {
-            permissions.add(Manifest.permission.RECORD_AUDIO);
+            neededPermissions.add(Manifest.permission.RECORD_AUDIO);
         }
 
-        if (permissions.isEmpty()) {
+        if (neededPermissions.isEmpty()) {
             return true;
         } else {
-            ActivityCompat.requestPermissions(this, permissions.toArray(new String[0]), PERM_REQUEST_INITIAL);
+            ActivityCompat.requestPermissions(this, neededPermissions.toArray(new String[0]), PERM_REQUEST_INITIAL);
             return false;
         }
     }
@@ -224,11 +228,14 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
 
     private void populateSavedFileList() {
 
-        String[] list = this.getFilesDir().list(mp4Filter);
+        DateFormat dateFormat = java.text.SimpleDateFormat.getDateTimeInstance();
+
+        File[] list = this.getFilesDir().listFiles(mp4Filter);
 
         filenameList.clear();
-        for (String f : list) {
-            filenameList.add(f);
+        for (File f : list) {
+            Date lastModified = new Date(f.lastModified());
+            filenameList.add(dateFormat.format(lastModified));
         }
     }
 
@@ -239,13 +246,17 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
 
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
         Toolbar myToolbar = (Toolbar) findViewById(R.id.main_toolbar);
         setSupportActionBar(myToolbar);
 
         populateSavedFileList();
-        arrayAdapter = new ArrayAdapter<>(this, R.layout.simple_filename_list_item, filenameList);
+        arrayAdapter = new ArrayAdapter<>(this, R.layout.saved_video_list_item, filenameList);
         ListView listView = (ListView) findViewById(R.id.filename_list);
         listView.setAdapter(arrayAdapter);
+
+        Intent intent = new Intent(this, RecordService.class);
+        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
 
         if (googleApiClient == null
                 || !(googleApiClient.isConnected() || googleApiClient.isConnecting())) {
@@ -297,8 +308,7 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
     public void onStart() {
 
         Log.d(TAG, "onStart");
-        Intent intent = new Intent(this, RecordService.class);
-        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
+
         super.onStart();
     }
 
@@ -313,7 +323,6 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
     public void onStop() {
 
         Log.d(TAG, "onStop");
-        unbindService(serviceConnection);
         super.onStop();
     }
 
@@ -321,6 +330,7 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
     public void onDestroy() {
 
         Log.d(TAG, "onDestroy");
+        unbindService(serviceConnection);
         super.onDestroy();
     }
 
@@ -328,11 +338,6 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
     public void onResume() {
 
         super.onResume();
-
-        if (recordService != null && recordService.getRecordState().equals(RecordService.RecordState.STARTED)) {
-
-//            btnRecord.setText(R.string.stop_button);
-        }
     }
 
     @Override

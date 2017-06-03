@@ -256,6 +256,8 @@ public class RecordService extends Service {
     @Override
     public void onCreate() {
 
+        Log.d(TAG, "onCreate");
+
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
         PreferenceActivity.updateServiceFromPrefs(sharedPreferences, getResources());
 
@@ -268,6 +270,8 @@ public class RecordService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+
+        Log.d(TAG, "onStartCommand");
 
         recordState = RecordState.STOPPED;
         startRecording();
@@ -294,9 +298,14 @@ public class RecordService extends Service {
 
         Log.d(TAG, "onDestroy");
         releaseResources();
+
+        videoDb.close();
+        audioDb.close();
     }
 
     private void startRecording() {
+
+        Log.d(TAG, "startRecording");
 
         new Thread(new Runnable() {
 
@@ -337,6 +346,8 @@ public class RecordService extends Service {
 
         @Override
         public void onOpened(@NonNull CameraDevice camera) {
+
+            Log.d(TAG, "cameraStateCallback.onOpened");
 
             cameraDevice = camera;
             recordState = RecordState.STARTING;
@@ -528,6 +539,10 @@ public class RecordService extends Service {
                 }
             }
 
+            if (recordState != RecordState.STARTED) {
+                return;
+            }
+
             ByteBuffer outputBuffer = null;
             try {
                 outputBuffer = codec.getOutputBuffer(index);
@@ -622,6 +637,10 @@ public class RecordService extends Service {
         public void onOutputBufferAvailable(@NonNull MediaCodec codec, int index, @NonNull MediaCodec.BufferInfo info) {
 
             if ((info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == MediaCodec.BUFFER_FLAG_CODEC_CONFIG) {
+                return;
+            }
+
+            if (recordState != RecordState.STARTED) {
                 return;
             }
 
@@ -886,11 +905,11 @@ public class RecordService extends Service {
 
         boolean saved = dumpBuffersToFile();
 
-//        releaseResources();
-
         if (onStopRecordCallback != null) {
             onStopRecordCallback.onStopRecord();
         }
+
+        releaseResources();
 
         recordState = RecordState.STOPPED;
         stopForeground(true);
@@ -899,7 +918,7 @@ public class RecordService extends Service {
 
     private boolean dumpBuffersToFile() {
 
-        String formattedDate = (String) DateFormat.format("yyyy-MM-dd HH:mm", Calendar.getInstance());
+        String formattedDate = (String) DateFormat.format("yyyy-MM-dd HH:mm:ss", Calendar.getInstance());
 
         internalFile = new File(getApplicationContext().getFilesDir(), formattedDate + ".mp4");
         String filePath = internalFile.getAbsolutePath();
@@ -916,6 +935,12 @@ public class RecordService extends Service {
             mediaMuxer = new MediaMuxer(filePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
         } catch (IOException e) {
             e.printStackTrace();
+            stopSelf();
+            return false;
+        }
+
+        if (videoFormat == null) {
+            Log.d(TAG, "null videoFormat");
             stopSelf();
             return false;
         }
@@ -1005,8 +1030,7 @@ public class RecordService extends Service {
 
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
 
-        if (sharedPreferences.getBoolean(PreferenceActivity.KEY_PREF_BACKUP, false)
-                && MainActivity.hasDriveApi()) {
+        if (backupToDrive && MainActivity.hasDriveApi()) {
 
                 /*String folderId = sharedPreferences.getString(KEY_DRIVE_FOLDER_ID, null);
                 DriveId driveId = null;
@@ -1091,9 +1115,6 @@ public class RecordService extends Service {
         if (audioRecord != null) {
             audioRecord.release();
         }
-
-        videoDb.close();
-        audioDb.close();
     }
 
     public static void setRecordDuration(int recordDuration) {
