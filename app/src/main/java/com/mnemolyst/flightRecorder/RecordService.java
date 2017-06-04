@@ -628,7 +628,11 @@ public class RecordService extends Service {
                     break;
                 case STOPPING:
                 case STOPPED:
-                    codec.queueInputBuffer(index, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                    try {
+                        codec.queueInputBuffer(index, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                    } catch (IllegalStateException e) {
+                        e.printStackTrace();
+                    }
                     break;
             }
         }
@@ -666,7 +670,11 @@ public class RecordService extends Service {
             BufferDataInfoPair dataInfoPair = new BufferDataInfoPair(insertedId, info);
             audioBufferList.add(dataInfoPair);
 
-            codec.releaseOutputBuffer(index, false);
+            try {
+                codec.releaseOutputBuffer(index, false);
+            } catch (IllegalStateException e) {
+                e.printStackTrace();
+            }
         }
 
         @Override
@@ -878,11 +886,12 @@ public class RecordService extends Service {
     private void cameraStopped() {
 
         Log.d(TAG, "cameraStopped");
+        releaseResources();
 
         if (recordState.equals(RecordState.STARTED)) {
 
             recordState = RecordState.STOPPING;
-            videoCodec.signalEndOfInputStream();
+//            videoCodec.signalEndOfInputStream();
         }
 
         if (audioRecord != null
@@ -908,8 +917,6 @@ public class RecordService extends Service {
         if (onStopRecordCallback != null) {
             onStopRecordCallback.onStopRecord();
         }
-
-        releaseResources();
 
         recordState = RecordState.STOPPED;
         stopForeground(true);

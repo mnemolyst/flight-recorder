@@ -9,6 +9,7 @@ import android.content.IntentSender;
 import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.preference.PreferenceManager;
@@ -16,12 +17,15 @@ import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.design.widget.Snackbar;
 import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.FileProvider;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
+import android.view.View;
+import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.ListView;
 import android.widget.Toast;
@@ -48,7 +52,8 @@ import java.util.Date;
     "about" screen legal info (Drive)
  */
 
-public class MainActivity extends AppCompatActivity implements GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener {
+public class MainActivity extends AppCompatActivity
+        implements GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener {
 
     final static String TAG = "MainActivity";
     private final static int PERM_REQUEST_INITIAL = 1;
@@ -58,6 +63,7 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
     private RecordService recordService = null;
     private ArrayList<String> availableVideoQualities = new ArrayList<>();
 
+    private File[] fileList;
     private ArrayList<String> filenameList = new ArrayList<String>();
     private ArrayAdapter<String> arrayAdapter;
 
@@ -117,17 +123,21 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
         }
     }
     /*
-     *  Google Android API
+     *  End of Google Android API callbacks
      */
 
     @Override
     protected void onActivityResult(final int requestCode, final int resultCode, final Intent data) {
+
         switch (requestCode) {
             case ConnectionResult.RESOLUTION_REQUIRED:
+
                 if (resultCode == RESULT_OK) {
+
                     Log.d(TAG, "Google connecting again");
                     googleApiClient.connect();
                 } else {
+
                     SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
                     SharedPreferences.Editor editor = sharedPreferences.edit();
                     editor.putBoolean(PreferenceActivity.KEY_PREF_BACKUP, false);
@@ -172,10 +182,59 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
         }
     };
 
-    private void toggleRecording() {
-        if (recordService != null) {
-            Log.d(TAG, recordService.getRecordState().toString());
+    private AdapterView.OnItemClickListener itemClickListener = new AdapterView.OnItemClickListener() {
+
+        public void onItemClick(AdapterView parent, View v, int position, long id) {
+
+            Log.d(TAG, String.valueOf(id));
+
+            Uri uri = FileProvider.getUriForFile(MainActivity.this, "com.mnemolyst.flightRecorder.fileprovider", fileList[(int)id]);
+
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setData(uri);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            if (intent.resolveActivity(getPackageManager()) != null) {
+                startActivity(intent);
+            }
         }
+    };
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+
+        Log.d(TAG, "onCreate");
+
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+
+        Toolbar myToolbar = (Toolbar) findViewById(R.id.main_toolbar);
+        setSupportActionBar(myToolbar);
+
+        populateSavedFileList();
+        arrayAdapter = new ArrayAdapter<>(this, R.layout.saved_video_list_item, filenameList);
+        ListView listView = (ListView) findViewById(R.id.filename_list);
+        listView.setAdapter(arrayAdapter);
+        listView.setOnItemClickListener(itemClickListener);
+
+        Intent intent = new Intent(this, RecordService.class);
+        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
+
+        if (googleApiClient == null
+                || !(googleApiClient.isConnected() || googleApiClient.isConnecting())) {
+
+            MainActivity.restartGoogleApiClient(this);
+        }
+    }
+
+    @Override
+    public void onDestroy() {
+
+        Log.d(TAG, "onDestroy");
+        unbindService(serviceConnection);
+        super.onDestroy();
+    }
+
+    private void toggleRecording() {
 
         if (recordService != null && recordService.getRecordState().equals(RecordService.RecordState.STOPPED)) {
 
@@ -230,38 +289,12 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
 
         DateFormat dateFormat = java.text.SimpleDateFormat.getDateTimeInstance();
 
-        File[] list = this.getFilesDir().listFiles(mp4Filter);
+        fileList = this.getFilesDir().listFiles(mp4Filter);
 
         filenameList.clear();
-        for (File f : list) {
+        for (File f : fileList) {
             Date lastModified = new Date(f.lastModified());
             filenameList.add(dateFormat.format(lastModified));
-        }
-    }
-
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-
-        Log.d(TAG, "onCreate");
-
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
-
-        Toolbar myToolbar = (Toolbar) findViewById(R.id.main_toolbar);
-        setSupportActionBar(myToolbar);
-
-        populateSavedFileList();
-        arrayAdapter = new ArrayAdapter<>(this, R.layout.saved_video_list_item, filenameList);
-        ListView listView = (ListView) findViewById(R.id.filename_list);
-        listView.setAdapter(arrayAdapter);
-
-        Intent intent = new Intent(this, RecordService.class);
-        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
-
-        if (googleApiClient == null
-                || !(googleApiClient.isConnected() || googleApiClient.isConnecting())) {
-
-            MainActivity.restartGoogleApiClient(this);
         }
     }
 
@@ -305,48 +338,6 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
     }
 
     @Override
-    public void onStart() {
-
-        Log.d(TAG, "onStart");
-
-        super.onStart();
-    }
-
-    @Override
-    public void onPause() {
-
-        Log.d(TAG, "onPause");
-        super.onPause();
-    }
-
-    @Override
-    public void onStop() {
-
-        Log.d(TAG, "onStop");
-        super.onStop();
-    }
-
-    @Override
-    public void onDestroy() {
-
-        Log.d(TAG, "onDestroy");
-        unbindService(serviceConnection);
-        super.onDestroy();
-    }
-
-    @Override
-    public void onResume() {
-
-        super.onResume();
-    }
-
-    @Override
-    public void onRestart() {
-
-        super.onRestart();
-    }
-
-    @Override
     public boolean onCreateOptionsMenu(Menu menu) {
 
         MenuInflater menuInflater = getMenuInflater();
@@ -360,6 +351,7 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
         Intent intent;
 
         switch (menuItem.getItemId()) {
+
             case R.id.menuItemRecord:
                 toggleRecording();
                 return true;
