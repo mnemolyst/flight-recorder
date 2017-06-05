@@ -19,6 +19,8 @@ import android.support.design.widget.Snackbar;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.FileProvider;
 import android.support.v7.app.AppCompatActivity;
+import android.support.v7.widget.LinearLayoutManager;
+import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.Toolbar;
 import android.util.Log;
 import android.view.Menu;
@@ -64,8 +66,9 @@ public class MainActivity extends AppCompatActivity
     private ArrayList<String> availableVideoQualities = new ArrayList<>();
 
     private File[] fileList;
-    private ArrayList<String> filenameList = new ArrayList<String>();
+    private ArrayList<String> filenameList = new ArrayList<>();
     private ArrayAdapter<String> arrayAdapter;
+    private SavedVideoListAdapter savedVideoListAdapter;
 
     private ServiceConnection serviceConnection = new ServiceConnection() {
 
@@ -178,7 +181,7 @@ public class MainActivity extends AppCompatActivity
 
             Log.d(TAG, "onStopRecord");
             populateSavedFileList();
-            arrayAdapter.notifyDataSetChanged();
+            savedVideoListAdapter.notifyDataSetChanged();
         }
     };
 
@@ -211,10 +214,10 @@ public class MainActivity extends AppCompatActivity
         setSupportActionBar(myToolbar);
 
         populateSavedFileList();
-        arrayAdapter = new ArrayAdapter<>(this, R.layout.saved_video_list_item, filenameList);
-        ListView listView = (ListView) findViewById(R.id.filename_list);
-        listView.setAdapter(arrayAdapter);
-        listView.setOnItemClickListener(itemClickListener);
+        savedVideoListAdapter = new SavedVideoListAdapter(filenameList);
+        RecyclerView recyclerView = (RecyclerView) findViewById(R.id.filename_list);
+        recyclerView.setLayoutManager(new LinearLayoutManager(this));
+        recyclerView.setAdapter(savedVideoListAdapter);
 
         Intent intent = new Intent(this, RecordService.class);
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
@@ -241,7 +244,7 @@ public class MainActivity extends AppCompatActivity
             if (getPermissions()) {
                 startRecording();
             }
-        } else {
+        } else if (recordService != null) {
 
             recordService.stopRecording();
         }
@@ -369,7 +372,7 @@ public class MainActivity extends AppCompatActivity
                     Log.d(TAG, String.valueOf(file.delete()));
                 }
                 populateSavedFileList();
-                arrayAdapter.notifyDataSetChanged();
+                savedVideoListAdapter.notifyDataSetChanged();
             default:
                 return super.onOptionsItemSelected(menuItem);
         }
