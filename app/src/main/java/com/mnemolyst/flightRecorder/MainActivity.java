@@ -23,13 +23,15 @@ import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.Toolbar;
 import android.util.Log;
+import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
-import android.widget.ListView;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import com.google.android.gms.common.ConnectionResult;
@@ -69,6 +71,65 @@ public class MainActivity extends AppCompatActivity
     private ArrayList<String> filenameList = new ArrayList<>();
     private ArrayAdapter<String> arrayAdapter;
     private SavedVideoListAdapter savedVideoListAdapter;
+
+    class SavedVideoListAdapter extends RecyclerView.Adapter<SavedVideoListAdapter.ViewHolder> {
+
+        private ArrayList<String> dataSet;
+
+        class ViewHolder extends RecyclerView.ViewHolder implements View.OnClickListener {
+
+            View view;
+            TextView videoLableView;
+
+            ViewHolder(View view) {
+
+                super(view);
+                this.view = view;
+                videoLableView = (TextView) view.findViewById(R.id.videoLabel);
+                videoLableView.setOnClickListener(this);
+            }
+
+            @Override
+            public void onClick(View v) {
+
+                int id = this.getAdapterPosition();
+                Uri uri = FileProvider.getUriForFile(MainActivity.this, "com.mnemolyst.flightRecorder.fileprovider", fileList[(int)id]);
+
+                Intent intent = new Intent(Intent.ACTION_VIEW);
+                intent.setData(uri);
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                if (intent.resolveActivity(getPackageManager()) != null) {
+                    startActivity(intent);
+                }
+            }
+        }
+
+        public SavedVideoListAdapter(ArrayList<String> dataSet) {
+            this.dataSet = dataSet;
+        }
+
+        @Override
+        public ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+
+            View v = (View) LayoutInflater.from(parent.getContext()).inflate(R.layout.saved_video_list_item, parent, false);
+//            v.setBottom(20);
+            // set the view's size, margins, paddings and layout parameters
+
+            return new SavedVideoListAdapter.ViewHolder(v);
+        }
+
+        @Override
+        public void onBindViewHolder(ViewHolder holder, int position) {
+
+            TextView textView = (TextView) holder.view.findViewById(R.id.videoLabel);
+            textView.setText(dataSet.get(position));
+        }
+
+        @Override
+        public int getItemCount() {
+            return dataSet.size();
+        }
+    }
 
     private ServiceConnection serviceConnection = new ServiceConnection() {
 
@@ -181,7 +242,7 @@ public class MainActivity extends AppCompatActivity
 
             Log.d(TAG, "onStopRecord");
             populateSavedFileList();
-            savedVideoListAdapter.notifyDataSetChanged();
+            savedVideoListAdapter.notifyItemInserted(savedVideoListAdapter.getItemCount());
         }
     };
 
@@ -210,12 +271,12 @@ public class MainActivity extends AppCompatActivity
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        Toolbar myToolbar = (Toolbar) findViewById(R.id.main_toolbar);
+        Toolbar myToolbar = (Toolbar) findViewById(R.id.mainToolbar);
         setSupportActionBar(myToolbar);
 
         populateSavedFileList();
         savedVideoListAdapter = new SavedVideoListAdapter(filenameList);
-        RecyclerView recyclerView = (RecyclerView) findViewById(R.id.filename_list);
+        RecyclerView recyclerView = (RecyclerView) findViewById(R.id.filenameList);
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
         recyclerView.setAdapter(savedVideoListAdapter);
 
@@ -262,8 +323,8 @@ public class MainActivity extends AppCompatActivity
             neededPermissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
         }*/
 
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
-                && ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.RECORD_AUDIO)) {
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+//                && ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.RECORD_AUDIO)) {
             neededPermissions.add(Manifest.permission.RECORD_AUDIO);
         }
 
