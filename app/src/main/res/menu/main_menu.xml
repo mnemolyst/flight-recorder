@@ -1,12 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<menu xmlns:app="http://schemas.android.com/apk/res-auto"
+<menu
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <item
-        android:id="@+id/menuItemRecord"
-        android:title="@string/menu_record_title"
-        android:icon="@drawable/recording_notification_icon"
-        app:showAsAction="ifRoom" />
     <item
         android:id="@+id/menuItemSettings"
         android:title="@string/menu_settings_title"

@@ -2,6 +2,7 @@
     <string name="app_name">Flight Recorder</string>
     <string name="notification_title">Recording</string>
     <string name="notification_message">Recording Video</string>
+    <string name="videoThumbnail">Video Thumbnail</string>
 
     <!-- Strings related to menus -->
 

@@ -9,10 +9,13 @@ import android.content.IntentSender;
 import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.media.ThumbnailUtils;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.preference.PreferenceManager;
+import android.provider.MediaStore;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.design.widget.Snackbar;
@@ -23,14 +26,15 @@ import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.Toolbar;
 import android.util.Log;
+import android.view.ActionMode;
+import android.view.ContextMenu;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
+import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -44,6 +48,7 @@ import java.io.File;
 import java.io.FilenameFilter;
 import java.text.DateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 
 /**
@@ -62,38 +67,43 @@ public class MainActivity extends AppCompatActivity
     final static String TAG = "MainActivity";
     private final static int PERM_REQUEST_INITIAL = 1;
 
+    private ActionMode actionMode;
+
     static GoogleApiClient googleApiClient;
 
     private RecordService recordService = null;
     private ArrayList<String> availableVideoQualities = new ArrayList<>();
 
-    private File[] fileList;
-    private ArrayList<String> filenameList = new ArrayList<>();
-    private ArrayAdapter<String> arrayAdapter;
+    private ArrayList<File> fileList = new ArrayList<>();
+//    private ArrayList<String> filenameList = new ArrayList<>();
+//    private ArrayAdapter<String> arrayAdapter;
     private SavedVideoListAdapter savedVideoListAdapter;
 
     class SavedVideoListAdapter extends RecyclerView.Adapter<SavedVideoListAdapter.ViewHolder> {
 
-        private ArrayList<String> dataSet;
+        private ArrayList<File> dataSet;
 
-        class ViewHolder extends RecyclerView.ViewHolder implements View.OnClickListener {
+        class ViewHolder extends RecyclerView.ViewHolder implements View.OnClickListener, View.OnLongClickListener {
 
             View view;
-            TextView videoLableView;
+            TextView dateTimeView;
+            ImageView thumbnailView;
 
             ViewHolder(View view) {
 
                 super(view);
                 this.view = view;
-                videoLableView = (TextView) view.findViewById(R.id.videoLabel);
-                videoLableView.setOnClickListener(this);
+//                dateTimeView = (TextView) view.findViewById(R.id.dateTime);
+//                thumbnailView = (ImageView) view.findViewById(R.id.videoThumbnail);
+//                view.setOnClickListener(this);
+                view.setOnLongClickListener(this);
             }
 
             @Override
-            public void onClick(View v) {
+            public void onClick(View view) {
 
                 int id = this.getAdapterPosition();
-                Uri uri = FileProvider.getUriForFile(MainActivity.this, "com.mnemolyst.flightRecorder.fileprovider", fileList[(int)id]);
+                Uri uri = FileProvider.getUriForFile(MainActivity.this, "com.mnemolyst.flightRecorder.fileprovider", fileList.get(id));
 
                 Intent intent = new Intent(Intent.ACTION_VIEW);
                 intent.setData(uri);
@@ -102,9 +112,21 @@ public class MainActivity extends AppCompatActivity
                     startActivity(intent);
                 }
             }
+
+            @Override
+            public boolean onLongClick(View view) {
+                if (actionMode != null) {
+                    return false;
+                }
+
+                // Start the CAB using the ActionMode.Callback defined above
+                actionMode = MainActivity.this.startActionMode(actionModeCallback);
+                view.setSelected(true);
+                return true;
+            }
         }
 
-        public SavedVideoListAdapter(ArrayList<String> dataSet) {
+        public SavedVideoListAdapter(ArrayList<File> dataSet) {
             this.dataSet = dataSet;
         }
 
@@ -121,8 +143,17 @@ public class MainActivity extends AppCompatActivity
         @Override
         public void onBindViewHolder(ViewHolder holder, int position) {
 
-            TextView textView = (TextView) holder.view.findViewById(R.id.videoLabel);
-            textView.setText(dataSet.get(position));
+            File thisFile = dataSet.get(position);
+
+            DateFormat dateFormat = java.text.SimpleDateFormat.getDateTimeInstance(DateFormat.LONG, DateFormat.SHORT);
+            String lastModified = dateFormat.format(new Date(thisFile.lastModified()));
+
+            TextView textView = (TextView) holder.view.findViewById(R.id.dateTime);
+            textView.setText(lastModified);
+
+            Bitmap thumbnail = ThumbnailUtils.createVideoThumbnail(thisFile.getAbsolutePath(), MediaStore.Images.Thumbnails.MICRO_KIND);
+            ImageView imageView = (ImageView) holder.view.findViewById(R.id.videoThumbnail);
+            imageView.setImageBitmap(thumbnail);
         }
 
         @Override
@@ -246,20 +277,46 @@ public class MainActivity extends AppCompatActivity
         }
     };
 
-    private AdapterView.OnItemClickListener itemClickListener = new AdapterView.OnItemClickListener() {
+    private ActionMode.Callback actionModeCallback = new ActionMode.Callback() {
 
-        public void onItemClick(AdapterView parent, View v, int position, long id) {
+        // Called when the action mode is created; startActionMode() was called
+        @Override
+        public boolean onCreateActionMode(ActionMode mode, Menu menu) {
+            Log.d(TAG, "onCreateActionMode");
+            // Inflate a menu resource providing context menu items
+            MenuInflater inflater = mode.getMenuInflater();
+            inflater.inflate(R.menu.action_mode_menu, menu);
+            return true;
+        }
 
-            Log.d(TAG, String.valueOf(id));
+        // Called each time the action mode is shown. Always called after onCreateActionMode, but
+        // may be called multiple times if the mode is invalidated.
+        @Override
+        public boolean onPrepareActionMode(ActionMode mode, Menu menu) {
+            Log.d(TAG, "onPrepareActionMode");
+            return false; // Return false if nothing is done
+        }
 
-            Uri uri = FileProvider.getUriForFile(MainActivity.this, "com.mnemolyst.flightRecorder.fileprovider", fileList[(int)id]);
+        // Called when the user selects a contextual menu item
+        @Override
+        public boolean onActionItemClicked(ActionMode mode, MenuItem item) {
+            Log.d(TAG, "onActionItemClicked");
+            /*switch (item.getItemId()) {
+                case R.id.menu_share:
+                    shareCurrentItem();
+                    mode.finish(); // Action picked, so close the CAB
+                    return true;
+                default:
+                    return false;
+            }*/
+            return false;
+        }
 
-            Intent intent = new Intent(Intent.ACTION_VIEW);
-            intent.setData(uri);
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            if (intent.resolveActivity(getPackageManager()) != null) {
-                startActivity(intent);
-            }
+        // Called when the user exits the action mode
+        @Override
+        public void onDestroyActionMode(ActionMode actionMode) {
+            Log.d(TAG, "onDestroyActionMode");
+            MainActivity.this.actionMode = null;
         }
     };
 
@@ -275,8 +332,8 @@ public class MainActivity extends AppCompatActivity
         setSupportActionBar(myToolbar);
 
         populateSavedFileList();
-        savedVideoListAdapter = new SavedVideoListAdapter(filenameList);
-        RecyclerView recyclerView = (RecyclerView) findViewById(R.id.filenameList);
+        savedVideoListAdapter = new SavedVideoListAdapter(fileList);
+        RecyclerView recyclerView = (RecyclerView) findViewById(R.id.savedVideoList);
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
         recyclerView.setAdapter(savedVideoListAdapter);
 
@@ -289,6 +346,11 @@ public class MainActivity extends AppCompatActivity
             MainActivity.restartGoogleApiClient(this);
         }
     }
+
+    /*@Override
+    public void onCreateContextMenu(ContextMenu contextMenu, View view, ContextMenu.ContextMenuInfo menuInfo) {
+        Log.d(TAG, "context menu");
+    }*/
 
     @Override
     public void onDestroy() {
@@ -351,15 +413,17 @@ public class MainActivity extends AppCompatActivity
 
     private void populateSavedFileList() {
 
-        DateFormat dateFormat = java.text.SimpleDateFormat.getDateTimeInstance();
+        DateFormat dateFormat = java.text.SimpleDateFormat.getDateTimeInstance(DateFormat.LONG, DateFormat.SHORT);
 
-        fileList = this.getFilesDir().listFiles(mp4Filter);
+        File[] files = this.getFilesDir().listFiles(mp4Filter);
+        fileList.clear();
+        fileList.addAll(Arrays.asList(files));
 
-        filenameList.clear();
+        /*filenameList.clear();
         for (File f : fileList) {
             Date lastModified = new Date(f.lastModified());
             filenameList.add(dateFormat.format(lastModified));
-        }
+        }*/
     }
 
     static boolean hasLocationApi() {

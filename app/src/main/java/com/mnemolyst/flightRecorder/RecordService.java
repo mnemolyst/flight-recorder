@@ -13,6 +13,7 @@ import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
+import android.graphics.Bitmap;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -33,11 +34,13 @@ import android.media.MediaCodecList;
 import android.media.MediaFormat;
 import android.media.MediaMuxer;
 import android.media.MediaRecorder;
+import android.media.ThumbnailUtils;
 import android.os.Binder;
 import android.os.Environment;
 import android.os.IBinder;
 import android.preference.PreferenceManager;
 import android.provider.BaseColumns;
+import android.provider.MediaStore;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.util.Log;
@@ -54,6 +57,8 @@ import com.google.android.gms.location.LocationServices;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
@@ -137,6 +142,8 @@ public class RecordService extends Service {
     private long timeTipped = 0;
     private boolean orientationLocked = false;
     private boolean tippedButLocked = false;
+
+    private boolean thumbnailNextKeyframe = false;
 
     private OnStartRecordCallback onStartRecordCallback;
     private OnOrientationLockedCallback onOrientationLockedCallback;
@@ -558,14 +565,18 @@ public class RecordService extends Service {
             byte[] bufferBytes = new byte[outputBuffer.remaining()];
             outputBuffer.get(bufferBytes);
 
+            codec.releaseOutputBuffer(index, false);
+
             ContentValues contentValues = new ContentValues();
             contentValues.put(EncodedVideoContract.Schema.VIDEO_DATA_COLUMN_NAME, bufferBytes);
             long insertedId = videoDb.insert(EncodedVideoContract.Schema.TABLE_NAME, null, contentValues);
 
             BufferDataInfoPair dataInfoPair = new BufferDataInfoPair(insertedId, info);
+            if (thumbnailNextKeyframe && (info.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) == MediaCodec.BUFFER_FLAG_KEY_FRAME) {
+                dataInfoPair.setIsThumbnail(true);
+                thumbnailNextKeyframe = false;
+            }
             videoBufferList.add(dataInfoPair);
-
-            codec.releaseOutputBuffer(index, false);
 
             // Discard old buffers
             if (videoBufferList.size() >= 2) {
@@ -769,9 +780,10 @@ public class RecordService extends Service {
                         || (downAxis == DownAxis.Y_POS && event.values[1] < gThreshold)
                         || (downAxis == DownAxis.Y_NEG && event.values[1] > -gThreshold)) { /* tipped */
 
-                    if (!tippedButLocked) { /* one-time tipover callback */
+                    if (! tippedButLocked) { /* one-time tipover callback */
 
                         tippedButLocked = true;
+                        thumbnailNextKeyframe = true;
 
                         if (onTipoverCallback != null) {
                             onTipoverCallback.onTipover();
@@ -930,6 +942,8 @@ public class RecordService extends Service {
         internalFile = new File(getApplicationContext().getFilesDir(), formattedDate + ".mp4");
         String filePath = internalFile.getAbsolutePath();
 
+        File thumbnailFile = new File(getApplicationContext().getFilesDir(), formattedDate + "_thumbnail.jpg");
+
         /*try {
             internalFile.delete();
             internalFile.createNewFile();
@@ -1034,6 +1048,16 @@ public class RecordService extends Service {
 
         mediaMuxer.stop();
         mediaMuxer.release();
+
+        /*Bitmap thumbnail = ThumbnailUtils.createVideoThumbnail(filePath, MediaStore.Images.Thumbnails.MICRO_KIND);
+        try {
+            OutputStream thumbnailOutputStream = new FileOutputStream(thumbnailFile);
+            thumbnail.compress(Bitmap.CompressFormat.JPEG, 75, thumbnailOutputStream);
+            thumbnailOutputStream.flush();
+            thumbnailOutputStream.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }*/
 
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
 
