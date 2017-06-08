@@ -4,11 +4,16 @@
     <string name="notification_message">Recording Video</string>
     <string name="videoThumbnail">Video Thumbnail</string>
 
-    <!-- Strings related to menus -->
+    <!-- Strings related to the main menu -->
 
     <string name="menu_record_title">Start recording</string>
     <string name="menu_settings_title">Settings</string>
     <string name="menu_about_title">About</string>
+
+    <!-- Strings related to the action mode menu -->
+
+    <string name="menu_delete">Delete</string>
+    <string name="menu_store_externally">Save to external storage</string>
 
     <!-- Strings related to settings -->
 
@@ -78,7 +83,11 @@
         Copyright &#x00A9; 2017 by Joshua Salisbury\n\n<b>No warranty is given for this product, not even an implied warranty of fitness for a particular purpose.</b>
     </string>
 
+    <!-- Snackbar strings -->
+
     <string name="camera_permission_note">Camera permission is required for operation.</string>
-    <string name="storage_permission_note">External Storage permission is required for operation.</string>
+    <string name="storage_permission_note">External Storage permission is required for this action.</string>
+    <string name="error_deleting">There was an error deleting the selected file.</string>
+    <string name="no_external_storage">External storage unavailable.</string>
 
 </resources>

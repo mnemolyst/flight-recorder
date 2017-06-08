@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentSender;
 import android.content.ServiceConnection;
@@ -13,21 +14,24 @@ import android.graphics.Bitmap;
 import android.media.ThumbnailUtils;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.IBinder;
 import android.preference.PreferenceManager;
 import android.provider.MediaStore;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.design.widget.FloatingActionButton;
 import android.support.design.widget.Snackbar;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.FileProvider;
+import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.Toolbar;
 import android.util.Log;
-import android.view.ActionMode;
-import android.view.ContextMenu;
+import android.support.v7.view.ActionMode;
+import android.util.SparseBooleanArray;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
@@ -45,7 +49,11 @@ import com.google.android.gms.drive.Drive;
 import com.google.android.gms.location.LocationServices;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.FilenameFilter;
+import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -66,7 +74,9 @@ public class MainActivity extends AppCompatActivity
 
     final static String TAG = "MainActivity";
     private final static int PERM_REQUEST_INITIAL = 1;
+    private final static int PERM_REQUEST_STORAGE = 2;
 
+    private Toolbar toolbar;
     private ActionMode actionMode;
 
     static GoogleApiClient googleApiClient;
@@ -82,6 +92,41 @@ public class MainActivity extends AppCompatActivity
     class SavedVideoListAdapter extends RecyclerView.Adapter<SavedVideoListAdapter.ViewHolder> {
 
         private ArrayList<File> dataSet;
+        private SparseBooleanArray selectedPositions = new SparseBooleanArray();
+        private int selectedPos = -1;
+
+        ArrayList<File> getSelectedFiles() {
+            ArrayList<File> ret = new ArrayList<>();
+            for (int i = 0; i < dataSet.size(); i++) {
+                if (selectedPositions.get(i)) {
+                    ret.add(dataSet.get(i));
+                }
+            }
+            return ret;
+        }
+
+        void removeFile(int idx) {
+            try {
+                dataSet.remove(idx);
+                notifyItemRemoved(idx);
+            } catch (IndexOutOfBoundsException e) {
+                e.printStackTrace();
+            }
+        }
+
+        void removeSelectedFiles() {
+            for (int i = 0; i < dataSet.size(); i++) {
+                if (selectedPositions.get(i)) {
+                    dataSet.remove(i);
+                    notifyItemRemoved(i);
+                }
+            }
+        }
+
+        public void selectNone() {
+            selectedPositions.clear();
+            notifyDataSetChanged();
+        }
 
         class ViewHolder extends RecyclerView.ViewHolder implements View.OnClickListener, View.OnLongClickListener {
 
@@ -95,33 +140,67 @@ public class MainActivity extends AppCompatActivity
                 this.view = view;
 //                dateTimeView = (TextView) view.findViewById(R.id.dateTime);
 //                thumbnailView = (ImageView) view.findViewById(R.id.videoThumbnail);
-//                view.setOnClickListener(this);
+                view.setOnClickListener(this);
+//                view.findViewById(R.id.play).setOnClickListener(this);
                 view.setOnLongClickListener(this);
             }
 
             @Override
             public void onClick(View view) {
 
-                int id = this.getAdapterPosition();
-                Uri uri = FileProvider.getUriForFile(MainActivity.this, "com.mnemolyst.flightRecorder.fileprovider", fileList.get(id));
+                Log.d(TAG, "onClick");
 
-                Intent intent = new Intent(Intent.ACTION_VIEW);
-                intent.setData(uri);
-                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                if (intent.resolveActivity(getPackageManager()) != null) {
-                    startActivity(intent);
+                int position = getLayoutPosition();
+
+                if (actionMode == null) {
+                    Uri uri = FileProvider.getUriForFile(MainActivity.this, "com.mnemolyst.flightRecorder.fileprovider", dataSet.get(position));
+
+                    Intent intent = new Intent(Intent.ACTION_VIEW);
+                    intent.setData(uri);
+                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    if (intent.resolveActivity(getPackageManager()) != null) {
+                        startActivity(intent);
+                    }
+                } else {
+                    if (selectedPositions.get(position)) {
+                        selectedPositions.delete(position);
+                        if (selectedPositions.size() == 0) {
+                            actionMode.finish();
+                        }
+                    } else {
+                        selectedPositions.put(position, true);
+                    }
+                    notifyItemChanged(position);
                 }
+
+                /*switch (view.getId()) {
+                    case R.id.play:
+
+
+                        break;
+                    case R.id.savedVideoItem:
+
+                        Log.d(TAG, "hi");
+                        break;
+                }*/
             }
 
             @Override
             public boolean onLongClick(View view) {
+
+                Log.d(TAG, "onLongClick");
                 if (actionMode != null) {
                     return false;
                 }
 
                 // Start the CAB using the ActionMode.Callback defined above
-                actionMode = MainActivity.this.startActionMode(actionModeCallback);
-                view.setSelected(true);
+//                actionMode = MainActivity.this.startActionMode(actionModeCallback);
+                actionMode = startSupportActionMode(actionModeCallback);
+//                notifyItemChanged(selectedPos);
+                int position = getLayoutPosition();
+                selectedPositions.put(position, true);
+//                selectedPos = getLayoutPosition();
+                notifyItemChanged(position);
                 return true;
             }
         }
@@ -133,7 +212,7 @@ public class MainActivity extends AppCompatActivity
         @Override
         public ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
 
-            View v = (View) LayoutInflater.from(parent.getContext()).inflate(R.layout.saved_video_list_item, parent, false);
+            View v = LayoutInflater.from(parent.getContext()).inflate(R.layout.saved_video_list_item, parent, false);
 //            v.setBottom(20);
             // set the view's size, margins, paddings and layout parameters
 
@@ -150,10 +229,15 @@ public class MainActivity extends AppCompatActivity
 
             TextView textView = (TextView) holder.view.findViewById(R.id.dateTime);
             textView.setText(lastModified);
+            textView.setTextColor(getResources().getColorStateList(R.color.saved_video_list_text_color));
 
             Bitmap thumbnail = ThumbnailUtils.createVideoThumbnail(thisFile.getAbsolutePath(), MediaStore.Images.Thumbnails.MICRO_KIND);
             ImageView imageView = (ImageView) holder.view.findViewById(R.id.videoThumbnail);
             imageView.setImageBitmap(thumbnail);
+
+            holder.itemView.setSelected(selectedPositions.get(position));
+
+            Log.d(TAG, "onBind: " + String.valueOf(holder.itemView.isSelected()));
         }
 
         @Override
@@ -282,7 +366,7 @@ public class MainActivity extends AppCompatActivity
         // Called when the action mode is created; startActionMode() was called
         @Override
         public boolean onCreateActionMode(ActionMode mode, Menu menu) {
-            Log.d(TAG, "onCreateActionMode");
+
             // Inflate a menu resource providing context menu items
             MenuInflater inflater = mode.getMenuInflater();
             inflater.inflate(R.menu.action_mode_menu, menu);
@@ -293,30 +377,109 @@ public class MainActivity extends AppCompatActivity
         // may be called multiple times if the mode is invalidated.
         @Override
         public boolean onPrepareActionMode(ActionMode mode, Menu menu) {
-            Log.d(TAG, "onPrepareActionMode");
+
             return false; // Return false if nothing is done
         }
 
         // Called when the user selects a contextual menu item
         @Override
-        public boolean onActionItemClicked(ActionMode mode, MenuItem item) {
-            Log.d(TAG, "onActionItemClicked");
-            /*switch (item.getItemId()) {
-                case R.id.menu_share:
-                    shareCurrentItem();
-                    mode.finish(); // Action picked, so close the CAB
-                    return true;
+        public boolean onActionItemClicked(final ActionMode mode, MenuItem item) {
+
+            final ArrayList<File> selectedFiles = savedVideoListAdapter.getSelectedFiles();
+            if (selectedFiles.isEmpty()) {
+                return false;
+            }
+
+            switch (item.getItemId()) {
+                case R.id.menuItemDelete:
+
+                    new AlertDialog.Builder(MainActivity.this)
+                            .setTitle("Really delete?")
+                            .setMessage("Are you sure you want to permanently delete this file?")
+                            .setIcon(android.R.drawable.ic_dialog_alert)
+                            .setPositiveButton(android.R.string.yes, new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface dialog, int which) {
+
+                                    for (int i = 0; i < selectedFiles.size(); i++) {
+
+                                        if (selectedFiles.get(i).delete()) {
+                                            savedVideoListAdapter.removeFile(i);
+                                        } else {
+                                            Snackbar.make(findViewById(R.id.coordinator_layout), R.string.error_deleting, Snackbar.LENGTH_LONG).show();
+                                        }
+                                    }
+                                    mode.finish(); // Action picked, so close the CAB
+                                }
+                            })
+                            .setNegativeButton(android.R.string.no, null)
+                            .show();
+                    break;
+                case R.id.menuItemSave:
+
+                    if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
+
+                        if (isExternalStorageWritable()) {
+                            saveFilesToExternalStorage(selectedFiles);
+                        } else {
+                            Snackbar.make(findViewById(R.id.coordinator_layout), R.string.no_external_storage, Snackbar.LENGTH_LONG).show();
+                        }
+                        mode.finish();
+                    } else {
+                        ActivityCompat.requestPermissions(MainActivity.this, new String[] { Manifest.permission.WRITE_EXTERNAL_STORAGE }, PERM_REQUEST_STORAGE);
+                    }
+                    break;
                 default:
                     return false;
-            }*/
-            return false;
+            }
+
+            return true;
         }
 
         // Called when the user exits the action mode
         @Override
         public void onDestroyActionMode(ActionMode actionMode) {
-            Log.d(TAG, "onDestroyActionMode");
+
+            savedVideoListAdapter.selectNone();
             MainActivity.this.actionMode = null;
+        }
+    };
+
+    boolean isExternalStorageWritable() {
+        String state = Environment.getExternalStorageState();
+        return Environment.MEDIA_MOUNTED.equals(state);
+    }
+
+    void saveFilesToExternalStorage(ArrayList<File> files) {
+
+        for (File srcFile : files) {
+
+            File dstFile = new File(getApplicationContext().getExternalFilesDir(Environment.DIRECTORY_MOVIES), srcFile.getName());
+
+            try {
+                FileChannel inChannel = new FileInputStream(srcFile).getChannel();
+                FileChannel outChannel = new FileOutputStream(dstFile).getChannel();
+
+                try {
+                    inChannel.transferTo(0, inChannel.size(), outChannel);
+                } finally {
+
+                    if (inChannel != null) {
+                        inChannel.close();
+                    }
+                    outChannel.close();
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    private View.OnClickListener recordFabListener = new View.OnClickListener() {
+
+        @Override
+        public void onClick(View v) {
+            toggleRecording();
         }
     };
 
@@ -328,14 +491,17 @@ public class MainActivity extends AppCompatActivity
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        Toolbar myToolbar = (Toolbar) findViewById(R.id.mainToolbar);
-        setSupportActionBar(myToolbar);
+        toolbar = (Toolbar) findViewById(R.id.mainToolbar);
+        setSupportActionBar(toolbar);
 
         populateSavedFileList();
         savedVideoListAdapter = new SavedVideoListAdapter(fileList);
         RecyclerView recyclerView = (RecyclerView) findViewById(R.id.savedVideoList);
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
         recyclerView.setAdapter(savedVideoListAdapter);
+
+        FloatingActionButton recordFab = (FloatingActionButton) findViewById(R.id.recordFab);
+        recordFab.setOnClickListener(recordFabListener);
 
         Intent intent = new Intent(this, RecordService.class);
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
@@ -480,9 +646,6 @@ public class MainActivity extends AppCompatActivity
 
         switch (menuItem.getItemId()) {
 
-            case R.id.menuItemRecord:
-                toggleRecording();
-                return true;
             case R.id.menuItemSettings:
                 intent = new Intent(MainActivity.this, PreferenceActivity.class);
                 startActivity(intent);
@@ -508,7 +671,7 @@ public class MainActivity extends AppCompatActivity
 
         switch (requestCode) {
 
-            case PERM_REQUEST_INITIAL: {
+            case PERM_REQUEST_INITIAL:
                 boolean haveCamera = true;
 //                boolean haveStorage = true;
 
@@ -528,16 +691,24 @@ public class MainActivity extends AppCompatActivity
                     startRecording();
                 } else {
 
-                    if (ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.CAMERA)) {
-                        Snackbar snackbar = Snackbar.make(findViewById(R.id.coordinator_layout), R.string.camera_permission_note, Snackbar.LENGTH_LONG);
-                        snackbar.show();
-                    }
+                    Snackbar.make(findViewById(R.id.coordinator_layout), R.string.camera_permission_note, Snackbar.LENGTH_LONG).show();
                     /*if (ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
                         Snackbar snackbar = Snackbar.make(findViewById(R.id.coordinator_layout), R.string.storage_permission_note, Snackbar.LENGTH_LONG);
                         snackbar.show();
                     }*/
                 }
-            }
+                break;
+            case PERM_REQUEST_STORAGE:
+                if (permissions.length == 1
+                        && permissions[0].equals(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+
+                    saveFilesToExternalStorage(savedVideoListAdapter.getSelectedFiles());
+                } else {
+
+                    Snackbar.make(findViewById(R.id.coordinator_layout), R.string.storage_permission_note, Snackbar.LENGTH_LONG).show();
+                }
+                break;
         }
     }
 }

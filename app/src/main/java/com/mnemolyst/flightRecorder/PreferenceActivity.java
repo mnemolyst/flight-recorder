@@ -9,14 +9,12 @@ import android.content.pm.PackageManager;
 import android.content.res.Resources;
 import android.icu.text.AlphabeticIndex;
 import android.os.Bundle;
-import android.preference.CheckBoxPreference;
-import android.preference.EditTextPreference;
 import android.preference.ListPreference;
-import android.preference.MultiSelectListPreference;
 import android.preference.Preference;
 import android.preference.PreferenceFragment;
 import android.preference.PreferenceGroup;
 import android.preference.PreferenceManager;
+import android.preference.SwitchPreference;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.v4.app.ActivityCompat;
@@ -45,7 +43,7 @@ public class PreferenceActivity extends AppCompatActivity implements GoogleApiCl
     static final String KEY_PREF_LOCATION = "pref_location";
     static final String KEY_PREF_BACKUP = "pref_backup";
 
-    private static final int PERM_REQUEST_LOCATION = 2;
+    private static final int PERM_REQUEST_LOCATION = 3;
     private SettingsFragment settingsFragment;
 
     public static class SettingsFragment extends PreferenceFragment {
@@ -100,7 +98,7 @@ public class PreferenceActivity extends AppCompatActivity implements GoogleApiCl
                     Log.d(TAG, "Google connecting again");
                     MainActivity.googleApiClient.connect();
                 } else {
-                    CheckBoxPreference preference = (CheckBoxPreference) settingsFragment.findPreference(KEY_PREF_BACKUP);
+                    SwitchPreference preference = (SwitchPreference) settingsFragment.findPreference(KEY_PREF_BACKUP);
                     preference.setChecked(false);
                 }
                 break;
@@ -131,7 +129,7 @@ public class PreferenceActivity extends AppCompatActivity implements GoogleApiCl
         settingsFragment.getPreferenceScreen().getSharedPreferences().registerOnSharedPreferenceChangeListener(this);
 
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_DENIED) {
-            CheckBoxPreference preference = (CheckBoxPreference) settingsFragment.findPreference(KEY_PREF_LOCATION);
+            SwitchPreference preference = (SwitchPreference) settingsFragment.findPreference(KEY_PREF_LOCATION);
             preference.setChecked(false);
         }
     }
@@ -232,7 +230,7 @@ public class PreferenceActivity extends AppCompatActivity implements GoogleApiCl
                 if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                     RecordService.setSaveLocation(true);
                 } else {
-                    CheckBoxPreference preference = (CheckBoxPreference) settingsFragment.findPreference(KEY_PREF_LOCATION);
+                    SwitchPreference preference = (SwitchPreference) settingsFragment.findPreference(KEY_PREF_LOCATION);
                     preference.setChecked(false);
                 }
                 break;
