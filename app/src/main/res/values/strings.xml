@@ -14,6 +14,8 @@
 
     <string name="menu_delete">Delete</string>
     <string name="menu_store_externally">Save to external storage</string>
+    <string name="delete_confirm_title">Really delete?</string>
+    <string name="delete_confirm_text">Are you sure you want to permanently delete the selected files?</string>
 
     <!-- Strings related to settings -->
 

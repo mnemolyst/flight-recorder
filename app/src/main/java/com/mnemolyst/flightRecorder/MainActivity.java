@@ -1,6 +1,8 @@
 package com.mnemolyst.flightRecorder;
 
 import android.Manifest;
+import android.animation.Animator;
+import android.animation.ObjectAnimator;
 import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Context;
@@ -11,6 +13,7 @@ import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
+import android.graphics.Path;
 import android.media.ThumbnailUtils;
 import android.net.Uri;
 import android.os.Bundle;
@@ -22,13 +25,19 @@ import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.design.widget.FloatingActionButton;
 import android.support.design.widget.Snackbar;
+import android.support.v7.widget.CardView;
+import android.transition.Scene;
+import android.transition.Transition;
+import android.transition.TransitionManager;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.FileProvider;
+import android.support.v4.view.ViewPropertyAnimatorCompat;
 import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.Toolbar;
+import android.transition.TransitionInflater;
 import android.util.Log;
 import android.support.v7.view.ActionMode;
 import android.util.SparseBooleanArray;
@@ -37,7 +46,14 @@ import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
+import android.view.ViewAnimationUtils;
 import android.view.ViewGroup;
+import android.view.ViewPropertyAnimator;
+import android.view.animation.Animation;
+import android.view.animation.AnimationUtils;
+import android.view.animation.PathInterpolator;
+import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -78,6 +94,11 @@ public class MainActivity extends AppCompatActivity
 
     private Toolbar toolbar;
     private ActionMode actionMode;
+    private TransitionManager transitionManager;
+    private Scene sceneNormal;
+    private Scene sceneRecording;
+    private ViewGroup sceneContainer;
+    private FloatingActionButton recordFab;
 
     static GoogleApiClient googleApiClient;
 
@@ -96,8 +117,10 @@ public class MainActivity extends AppCompatActivity
         private int selectedPos = -1;
 
         ArrayList<File> getSelectedFiles() {
+
             ArrayList<File> ret = new ArrayList<>();
             for (int i = 0; i < dataSet.size(); i++) {
+
                 if (selectedPositions.get(i)) {
                     ret.add(dataSet.get(i));
                 }
@@ -106,6 +129,7 @@ public class MainActivity extends AppCompatActivity
         }
 
         void removeFile(int idx) {
+
             try {
                 dataSet.remove(idx);
                 notifyItemRemoved(idx);
@@ -115,7 +139,9 @@ public class MainActivity extends AppCompatActivity
         }
 
         void removeSelectedFiles() {
+
             for (int i = 0; i < dataSet.size(); i++) {
+
                 if (selectedPositions.get(i)) {
                     dataSet.remove(i);
                     notifyItemRemoved(i);
@@ -138,10 +164,8 @@ public class MainActivity extends AppCompatActivity
 
                 super(view);
                 this.view = view;
-//                dateTimeView = (TextView) view.findViewById(R.id.dateTime);
-//                thumbnailView = (ImageView) view.findViewById(R.id.videoThumbnail);
+
                 view.setOnClickListener(this);
-//                view.findViewById(R.id.play).setOnClickListener(this);
                 view.setOnLongClickListener(this);
             }
 
@@ -153,6 +177,7 @@ public class MainActivity extends AppCompatActivity
                 int position = getLayoutPosition();
 
                 if (actionMode == null) {
+
                     Uri uri = FileProvider.getUriForFile(MainActivity.this, "com.mnemolyst.flightRecorder.fileprovider", dataSet.get(position));
 
                     Intent intent = new Intent(Intent.ACTION_VIEW);
@@ -162,7 +187,9 @@ public class MainActivity extends AppCompatActivity
                         startActivity(intent);
                     }
                 } else {
+
                     if (selectedPositions.get(position)) {
+
                         selectedPositions.delete(position);
                         if (selectedPositions.size() == 0) {
                             actionMode.finish();
@@ -170,19 +197,9 @@ public class MainActivity extends AppCompatActivity
                     } else {
                         selectedPositions.put(position, true);
                     }
+
                     notifyItemChanged(position);
                 }
-
-                /*switch (view.getId()) {
-                    case R.id.play:
-
-
-                        break;
-                    case R.id.savedVideoItem:
-
-                        Log.d(TAG, "hi");
-                        break;
-                }*/
             }
 
             @Override
@@ -205,7 +222,8 @@ public class MainActivity extends AppCompatActivity
             }
         }
 
-        public SavedVideoListAdapter(ArrayList<File> dataSet) {
+        // Constructor
+        SavedVideoListAdapter(ArrayList<File> dataSet) {
             this.dataSet = dataSet;
         }
 
@@ -394,8 +412,8 @@ public class MainActivity extends AppCompatActivity
                 case R.id.menuItemDelete:
 
                     new AlertDialog.Builder(MainActivity.this)
-                            .setTitle("Really delete?")
-                            .setMessage("Are you sure you want to permanently delete this file?")
+                            .setTitle(R.string.delete_confirm_title)
+                            .setMessage(R.string.delete_confirm_text)
                             .setIcon(android.R.drawable.ic_dialog_alert)
                             .setPositiveButton(android.R.string.yes, new DialogInterface.OnClickListener() {
                                 @Override
@@ -475,11 +493,80 @@ public class MainActivity extends AppCompatActivity
         }
     }
 
+    class SceneTransitionManager {
+        private final TransitionManager transitionManager;
+        Scene scene_normal;
+        Scene scene_recording;
+
+        public SceneTransitionManager() {
+            transitionManager = new TransitionManager();
+            FrameLayout container = (FrameLayout) findViewById(R.id.container);
+            scene_normal = Scene.getSceneForLayout(container, R.layout.scene_normal, MainActivity.this);
+            scene_recording = Scene.getSceneForLayout(container, R.layout.scene_recording, MainActivity.this);
+            Transition transition = TransitionInflater.from(MainActivity.this).inflateTransition(R.transition.recording);
+            transitionManager.setTransition(scene_normal, scene_recording, transition);
+            transitionManager.setTransition(scene_recording, scene_normal, transition);
+            transitionManager.transitionTo(scene_normal);
+        }
+
+        public void sceneTransition(Scene scene) {
+            if (scene == scene_normal) {
+                transitionManager.transitionTo(scene_normal);
+            } else {
+                transitionManager.transitionTo(scene_recording);
+            }
+        }
+    }
+
     private View.OnClickListener recordFabListener = new View.OnClickListener() {
 
         @Override
-        public void onClick(View v) {
-            toggleRecording();
+        public void onClick(View view) {
+
+//            Animation animation = AnimationUtils.loadAnimation(MainActivity.this, R.anim.fab_animation);
+//            animation.setInterpolator(MainActivity.this, android.R.anim.accelerate_decelerate_interpolator);
+//            PathInterpolator pathInterpolator = new PathInterpolator((float) 0.4, (float) 0.0, (float) 1.0, (float) 1.0);
+//            animation.setInterpolator(pathInterpolator);
+//            recordFab.startAnimation(animation);
+//            Path path =
+//            ObjectAnimator objectAnimator = ObjectAnimator.ofFloat(recordFab, View.X, View.Y, path);
+//            sceneTransitionManager.sceneTransition(sceneTransitionManager.scene_recording);
+
+//            Button recordingCard = (Button) findViewById(R.id.cardButton);
+//            recordingCard.setOnClickListener(recordCardListener);
+
+//            toggleRecording();
+            // previously invisible view
+            /*View recordCard = findViewById(R.id.recordCard);
+
+            int cx = recordCard.getWidth() / 2;
+            int cy = recordCard.getHeight() / 2;
+
+            float finalRadius = (float) Math.hypot(cx, cy);
+
+            Animator anim = ViewAnimationUtils.createCircularReveal(recordCard, cx, cy, 0, finalRadius);
+
+            recordCard.setVisibility(View.VISIBLE);
+            anim.start();*/
+        }
+    };
+
+    public void fabClick(View view) {
+        Log.d(TAG, "fabClick");
+        transitionManager.transitionTo(sceneRecording);
+    }
+
+    public void recordCardClick(View view) {
+        Log.d(TAG, "recordCardClick");
+        transitionManager.transitionTo(sceneNormal);
+    }
+
+    public View.OnClickListener recordCardListener = new View.OnClickListener() {
+
+        @Override
+        public void onClick(View view) {
+            Log.d(TAG, "hi");
+//            sceneTransitionManager.sceneTransition(sceneTransitionManager.scene_normal);
         }
     };
 
@@ -500,8 +587,15 @@ public class MainActivity extends AppCompatActivity
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
         recyclerView.setAdapter(savedVideoListAdapter);
 
-        FloatingActionButton recordFab = (FloatingActionButton) findViewById(R.id.recordFab);
-        recordFab.setOnClickListener(recordFabListener);
+        sceneContainer = (ViewGroup) findViewById(R.id.container);
+        sceneNormal = Scene.getSceneForLayout(sceneContainer, R.layout.scene_normal, this);
+        sceneRecording = Scene.getSceneForLayout(sceneContainer, R.layout.scene_recording, this);
+        transitionManager = TransitionInflater.from(this).inflateTransitionManager(R.transition.manager, sceneContainer);
+        transitionManager.transitionTo(sceneNormal);
+
+        recordFab = (FloatingActionButton) findViewById(R.id.recordFab);
+        recordFab.setClipToOutline(true);
+//        recordFab.setOnClickListener(recordFabListener);
 
         Intent intent = new Intent(this, RecordService.class);
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
