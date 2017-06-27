@@ -2,7 +2,6 @@ package com.mnemolyst.flightRecorder;
 
 import android.Manifest;
 import android.animation.Animator;
-import android.animation.ObjectAnimator;
 import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Context;
@@ -13,7 +12,6 @@ import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
-import android.graphics.Path;
 import android.media.ThumbnailUtils;
 import android.net.Uri;
 import android.os.Bundle;
@@ -25,13 +23,10 @@ import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.design.widget.FloatingActionButton;
 import android.support.design.widget.Snackbar;
-import android.support.v7.widget.CardView;
-import android.transition.Scene;
 import android.transition.Transition;
 import android.transition.TransitionManager;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.FileProvider;
-import android.support.v4.view.ViewPropertyAnimatorCompat;
 import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.LinearLayoutManager;
@@ -41,6 +36,7 @@ import android.transition.TransitionInflater;
 import android.util.Log;
 import android.support.v7.view.ActionMode;
 import android.util.SparseBooleanArray;
+import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
@@ -48,11 +44,7 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewAnimationUtils;
 import android.view.ViewGroup;
-import android.view.ViewPropertyAnimator;
-import android.view.animation.Animation;
-import android.view.animation.AnimationUtils;
-import android.view.animation.PathInterpolator;
-import android.widget.Button;
+import android.view.Window;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -94,10 +86,6 @@ public class MainActivity extends AppCompatActivity
 
     private Toolbar toolbar;
     private ActionMode actionMode;
-    private TransitionManager transitionManager;
-    private Scene sceneNormal;
-    private Scene sceneRecording;
-    private ViewGroup sceneContainer;
     private FloatingActionButton recordFab;
 
     static GoogleApiClient googleApiClient;
@@ -115,44 +103,6 @@ public class MainActivity extends AppCompatActivity
         private ArrayList<File> dataSet;
         private SparseBooleanArray selectedPositions = new SparseBooleanArray();
         private int selectedPos = -1;
-
-        ArrayList<File> getSelectedFiles() {
-
-            ArrayList<File> ret = new ArrayList<>();
-            for (int i = 0; i < dataSet.size(); i++) {
-
-                if (selectedPositions.get(i)) {
-                    ret.add(dataSet.get(i));
-                }
-            }
-            return ret;
-        }
-
-        void removeFile(int idx) {
-
-            try {
-                dataSet.remove(idx);
-                notifyItemRemoved(idx);
-            } catch (IndexOutOfBoundsException e) {
-                e.printStackTrace();
-            }
-        }
-
-        void removeSelectedFiles() {
-
-            for (int i = 0; i < dataSet.size(); i++) {
-
-                if (selectedPositions.get(i)) {
-                    dataSet.remove(i);
-                    notifyItemRemoved(i);
-                }
-            }
-        }
-
-        public void selectNone() {
-            selectedPositions.clear();
-            notifyDataSetChanged();
-        }
 
         class ViewHolder extends RecyclerView.ViewHolder implements View.OnClickListener, View.OnLongClickListener {
 
@@ -222,9 +172,46 @@ public class MainActivity extends AppCompatActivity
             }
         }
 
-        // Constructor
         SavedVideoListAdapter(ArrayList<File> dataSet) {
             this.dataSet = dataSet;
+        }
+
+        ArrayList<File> getSelectedFiles() {
+
+            ArrayList<File> ret = new ArrayList<>();
+            for (int i = 0; i < dataSet.size(); i++) {
+
+                if (selectedPositions.get(i)) {
+                    ret.add(dataSet.get(i));
+                }
+            }
+            return ret;
+        }
+
+        void removeFile(int idx) {
+
+            try {
+                dataSet.remove(idx);
+                notifyItemRemoved(idx);
+            } catch (IndexOutOfBoundsException e) {
+                e.printStackTrace();
+            }
+        }
+
+        void removeSelectedFiles() {
+
+            for (int i = 0; i < dataSet.size(); i++) {
+
+                if (selectedPositions.get(i)) {
+                    dataSet.remove(i);
+                    notifyItemRemoved(i);
+                }
+            }
+        }
+
+        public void selectNone() {
+            selectedPositions.clear();
+            notifyDataSetChanged();
         }
 
         @Override
@@ -345,11 +332,13 @@ public class MainActivity extends AppCompatActivity
     }
 
     private RecordService.OnStartRecordCallback onStartRecordCallback = new RecordService.OnStartRecordCallback() {
+
         @Override
         void onStartRecord() {
 
             Log.d(TAG, "onStartRecordCallback");
-            Log.d(TAG, recordService.getRecordState().toString());
+
+
         }
     };
 
@@ -369,6 +358,40 @@ public class MainActivity extends AppCompatActivity
         }
     };
 
+    Animator.AnimatorListener stopRecordingListener = new Animator.AnimatorListener() {
+        @Override
+        public void onAnimationStart(Animator animation) {
+
+        }
+
+        @Override
+        public void onAnimationEnd(Animator animation) {
+            View recordCard = findViewById(R.id.recordCard);
+            recordCard.setVisibility(View.GONE);
+
+            TransitionInflater transitionInflater = TransitionInflater.from(MainActivity.this);
+            Transition transition = transitionInflater.inflateTransition(R.transition.recording);
+            FrameLayout.LayoutParams layoutParams = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            );
+            layoutParams.gravity = Gravity.BOTTOM | Gravity.END;
+            recordFab.setLayoutParams(layoutParams);
+            recordFab.setVisibility(View.VISIBLE);
+            ViewGroup container = (ViewGroup) findViewById(R.id.container);
+            TransitionManager.beginDelayedTransition(container, transition);
+        }
+
+        @Override
+        public void onAnimationCancel(Animator animation) {
+
+        }
+
+        @Override
+        public void onAnimationRepeat(Animator animation) {
+
+        }
+    };
+
     private RecordService.OnStopRecordCallback onStopRecordCallback = new RecordService.OnStopRecordCallback() {
 
         void onStopRecord() {
@@ -376,6 +399,17 @@ public class MainActivity extends AppCompatActivity
             Log.d(TAG, "onStopRecord");
             populateSavedFileList();
             savedVideoListAdapter.notifyItemInserted(savedVideoListAdapter.getItemCount());
+
+            View recordCard = findViewById(R.id.recordCard);
+            int cx = recordCard.getWidth() / 2;
+            int cy = recordCard.getHeight() / 2;
+
+            float startRadius = (float) Math.hypot(cx, cy);
+
+            Animator anim = ViewAnimationUtils.createCircularReveal(recordCard, cx, cy, startRadius, 0);
+            anim.addListener(stopRecordingListener);
+
+            anim.start();
         }
     };
 
@@ -493,52 +527,18 @@ public class MainActivity extends AppCompatActivity
         }
     }
 
-    class SceneTransitionManager {
-        private final TransitionManager transitionManager;
-        Scene scene_normal;
-        Scene scene_recording;
+    Transition.TransitionListener startRecordingListener = new Transition.TransitionListener() {
+        @Override
+        public void onTransitionStart(Transition transition) {
 
-        public SceneTransitionManager() {
-            transitionManager = new TransitionManager();
-            FrameLayout container = (FrameLayout) findViewById(R.id.container);
-            scene_normal = Scene.getSceneForLayout(container, R.layout.scene_normal, MainActivity.this);
-            scene_recording = Scene.getSceneForLayout(container, R.layout.scene_recording, MainActivity.this);
-            Transition transition = TransitionInflater.from(MainActivity.this).inflateTransition(R.transition.recording);
-            transitionManager.setTransition(scene_normal, scene_recording, transition);
-            transitionManager.setTransition(scene_recording, scene_normal, transition);
-            transitionManager.transitionTo(scene_normal);
         }
-
-        public void sceneTransition(Scene scene) {
-            if (scene == scene_normal) {
-                transitionManager.transitionTo(scene_normal);
-            } else {
-                transitionManager.transitionTo(scene_recording);
-            }
-        }
-    }
-
-    private View.OnClickListener recordFabListener = new View.OnClickListener() {
 
         @Override
-        public void onClick(View view) {
+        public void onTransitionEnd(Transition transition) {
 
-//            Animation animation = AnimationUtils.loadAnimation(MainActivity.this, R.anim.fab_animation);
-//            animation.setInterpolator(MainActivity.this, android.R.anim.accelerate_decelerate_interpolator);
-//            PathInterpolator pathInterpolator = new PathInterpolator((float) 0.4, (float) 0.0, (float) 1.0, (float) 1.0);
-//            animation.setInterpolator(pathInterpolator);
-//            recordFab.startAnimation(animation);
-//            Path path =
-//            ObjectAnimator objectAnimator = ObjectAnimator.ofFloat(recordFab, View.X, View.Y, path);
-//            sceneTransitionManager.sceneTransition(sceneTransitionManager.scene_recording);
+            recordFab.setVisibility(View.GONE);
 
-//            Button recordingCard = (Button) findViewById(R.id.cardButton);
-//            recordingCard.setOnClickListener(recordCardListener);
-
-//            toggleRecording();
-            // previously invisible view
-            /*View recordCard = findViewById(R.id.recordCard);
-
+            View recordCard = findViewById(R.id.recordCard);
             int cx = recordCard.getWidth() / 2;
             int cy = recordCard.getHeight() / 2;
 
@@ -547,28 +547,43 @@ public class MainActivity extends AppCompatActivity
             Animator anim = ViewAnimationUtils.createCircularReveal(recordCard, cx, cy, 0, finalRadius);
 
             recordCard.setVisibility(View.VISIBLE);
-            anim.start();*/
+            anim.start();
+        }
+
+        @Override
+        public void onTransitionCancel(Transition transition) {
+
+        }
+
+        @Override
+        public void onTransitionPause(Transition transition) {
+
+        }
+
+        @Override
+        public void onTransitionResume(Transition transition) {
+
         }
     };
 
     public void fabClick(View view) {
-        Log.d(TAG, "fabClick");
-        transitionManager.transitionTo(sceneRecording);
+
+        TransitionInflater transitionInflater = TransitionInflater.from(this);
+        Transition transition = transitionInflater.inflateTransition(R.transition.recording);
+        transition.addListener(startRecordingListener);
+        FrameLayout.LayoutParams layoutParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        layoutParams.gravity = Gravity.CENTER;
+        recordFab.setLayoutParams(layoutParams);
+        ViewGroup container = (ViewGroup) findViewById(R.id.container);
+        TransitionManager.beginDelayedTransition(container, transition);
+
+        startRecording();
     }
 
     public void recordCardClick(View view) {
-        Log.d(TAG, "recordCardClick");
-        transitionManager.transitionTo(sceneNormal);
     }
-
-    public View.OnClickListener recordCardListener = new View.OnClickListener() {
-
-        @Override
-        public void onClick(View view) {
-            Log.d(TAG, "hi");
-//            sceneTransitionManager.sceneTransition(sceneTransitionManager.scene_normal);
-        }
-    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -576,6 +591,7 @@ public class MainActivity extends AppCompatActivity
         Log.d(TAG, "onCreate");
 
         super.onCreate(savedInstanceState);
+        getWindow().requestFeature(Window.FEATURE_CONTENT_TRANSITIONS);
         setContentView(R.layout.activity_main);
 
         toolbar = (Toolbar) findViewById(R.id.mainToolbar);
@@ -587,15 +603,7 @@ public class MainActivity extends AppCompatActivity
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
         recyclerView.setAdapter(savedVideoListAdapter);
 
-        sceneContainer = (ViewGroup) findViewById(R.id.container);
-        sceneNormal = Scene.getSceneForLayout(sceneContainer, R.layout.scene_normal, this);
-        sceneRecording = Scene.getSceneForLayout(sceneContainer, R.layout.scene_recording, this);
-        transitionManager = TransitionInflater.from(this).inflateTransitionManager(R.transition.manager, sceneContainer);
-        transitionManager.transitionTo(sceneNormal);
-
         recordFab = (FloatingActionButton) findViewById(R.id.recordFab);
-        recordFab.setClipToOutline(true);
-//        recordFab.setOnClickListener(recordFabListener);
 
         Intent intent = new Intent(this, RecordService.class);
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
@@ -633,6 +641,25 @@ public class MainActivity extends AppCompatActivity
         }
     }
 
+    private void startRecording() {
+
+        if (recordService != null
+                && recordService.getRecordState().equals(RecordService.RecordState.STOPPED)
+                && getPermissions()) {
+
+            Intent intent = new Intent(this, RecordService.class);
+            startService(intent);
+        }
+    }
+
+    private void stopRecording() {
+
+        if (recordService != null) {
+
+            recordService.stopRecording();
+        }
+    }
+
     private boolean getPermissions() {
 
         ArrayList<String> neededPermissions = new ArrayList<>();
@@ -656,12 +683,6 @@ public class MainActivity extends AppCompatActivity
             ActivityCompat.requestPermissions(this, neededPermissions.toArray(new String[0]), PERM_REQUEST_INITIAL);
             return false;
         }
-    }
-
-    private void startRecording() {
-
-        Intent intent = new Intent(this, RecordService.class);
-        startService(intent);
     }
 
     private FilenameFilter mp4Filter = new FilenameFilter() {
