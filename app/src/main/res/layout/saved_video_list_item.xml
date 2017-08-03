@@ -18,7 +18,7 @@
             android:layout_height="48dp"
             android:layout_centerVertical="true"
             android:layout_marginStart="16dp"
-            android:contentDescription="@string/videoThumbnail"
+            android:contentDescription="@string/video_thumbnail"
             android:scaleType="fitCenter" />
 
         <TextView xmlns:android="http://schemas.android.com/apk/res/android"

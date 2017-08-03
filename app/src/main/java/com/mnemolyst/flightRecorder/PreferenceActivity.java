@@ -62,19 +62,19 @@ public class PreferenceActivity extends AppCompatActivity implements GoogleApiCl
     @Override
     public void onConnected(@Nullable Bundle bundle) {
 
-        Log.d(TAG, "Google connected");
+       //Log.d(TAG, "Google connected");
     }
 
     @Override
     public void onConnectionSuspended(int i) {
 
-        Log.d(TAG, "Google disconnect");
+       //Log.d(TAG, "Google disconnect");
     }
 
     @Override
     public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
 
-        Log.e(TAG, "Google connect failed");
+       //Log.e(TAG, "Google connect failed");
 
         if (connectionResult.hasResolution()) {
             try {
@@ -95,7 +95,7 @@ public class PreferenceActivity extends AppCompatActivity implements GoogleApiCl
         switch (requestCode) {
             case ConnectionResult.RESOLUTION_REQUIRED:
                 if (resultCode == RESULT_OK) {
-                    Log.d(TAG, "Google connecting again");
+                   //Log.d(TAG, "Google connecting again");
                     MainActivity.googleApiClient.connect();
                 } else {
                     SwitchPreference preference = (SwitchPreference) settingsFragment.findPreference(KEY_PREF_BACKUP);
@@ -235,7 +235,7 @@ public class PreferenceActivity extends AppCompatActivity implements GoogleApiCl
                 }
                 break;
             default:
-                Log.d(TAG, "OTHER");
+               //Log.d(TAG, "OTHER");
         }
     }
 }

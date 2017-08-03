@@ -11,6 +11,7 @@ import android.content.IntentSender;
 import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.media.ThumbnailUtils;
 import android.net.Uri;
@@ -21,6 +22,7 @@ import android.preference.PreferenceManager;
 import android.provider.MediaStore;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.design.widget.CoordinatorLayout;
 import android.support.design.widget.FloatingActionButton;
 import android.support.design.widget.Snackbar;
 import android.transition.Transition;
@@ -36,6 +38,7 @@ import android.transition.TransitionInflater;
 import android.util.Log;
 import android.support.v7.view.ActionMode;
 import android.util.SparseBooleanArray;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.Menu;
@@ -45,10 +48,9 @@ import android.view.View;
 import android.view.ViewAnimationUtils;
 import android.view.ViewGroup;
 import android.view.Window;
-import android.widget.FrameLayout;
+import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GoogleApiAvailability;
@@ -84,31 +86,106 @@ public class MainActivity extends AppCompatActivity
     private final static int PERM_REQUEST_INITIAL = 1;
     private final static int PERM_REQUEST_STORAGE = 2;
 
-    private Toolbar toolbar;
     private ActionMode actionMode;
     private FloatingActionButton recordFab;
 
     static GoogleApiClient googleApiClient;
 
     private RecordService recordService = null;
-    private ArrayList<String> availableVideoQualities = new ArrayList<>();
 
     private ArrayList<File> fileList = new ArrayList<>();
 //    private ArrayList<String> filenameList = new ArrayList<>();
 //    private ArrayAdapter<String> arrayAdapter;
     private SavedVideoListAdapter savedVideoListAdapter;
 
+    private ServiceConnection serviceConnection = new ServiceConnection() {
+
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder service) {
+
+            //Log.d(TAG, "onServiceConnected");
+
+            RecordService.RecordServiceBinder binder = (RecordService.RecordServiceBinder) service;
+            recordService = binder.getService();
+
+            recordService.registerOnStartRecordCallback(onStartRecordCallback);
+            recordService.registerOnOrientationLockedCallback(onOrientationLockedCallback);
+            recordService.registerOnTipoverCallback(onTipoverCallback);
+            recordService.registerOnStopRecordCallback(onStopRecordCallback);
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+
+            //Log.d(TAG, "onServiceDisconnected");
+
+            recordService = null;
+        }
+    };
+
+    /*
+     *  Callbacks for Google Android API
+     */
+    @Override
+    public void onConnected(@Nullable Bundle bundle) {
+
+        //Log.d(TAG, "Google connected");
+    }
+
+    @Override
+    public void onConnectionSuspended(int i) {
+
+        //Log.d(TAG, "Google disconnect");
+    }
+
+    @Override
+    public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
+
+        //Log.e(TAG, "Google connect failed");
+
+        if (connectionResult.hasResolution()) {
+            try {
+                connectionResult.startResolutionForResult(this, ConnectionResult.RESOLUTION_REQUIRED);
+            } catch (IntentSender.SendIntentException e) {
+                // Unable to resolve, message user appropriately
+            }
+        } else {
+            GoogleApiAvailability.getInstance().getErrorDialog(this, connectionResult.getErrorCode(), 0).show();
+        }
+    }
+    /*
+     *  End of Google Android API callbacks
+     */
+
+    @Override
+    protected void onActivityResult(final int requestCode, final int resultCode, final Intent data) {
+
+        switch (requestCode) {
+            case ConnectionResult.RESOLUTION_REQUIRED:
+
+                if (resultCode == RESULT_OK) {
+
+                    //Log.d(TAG, "Google connecting again");
+                    googleApiClient.connect();
+                } else {
+
+                    SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
+                    SharedPreferences.Editor editor = sharedPreferences.edit();
+                    editor.putBoolean(PreferenceActivity.KEY_PREF_BACKUP, false);
+                    editor.apply();
+                }
+                break;
+        }
+    }
+
     class SavedVideoListAdapter extends RecyclerView.Adapter<SavedVideoListAdapter.ViewHolder> {
 
         private ArrayList<File> dataSet;
         private SparseBooleanArray selectedPositions = new SparseBooleanArray();
-        private int selectedPos = -1;
 
         class ViewHolder extends RecyclerView.ViewHolder implements View.OnClickListener, View.OnLongClickListener {
 
             View view;
-            TextView dateTimeView;
-            ImageView thumbnailView;
 
             ViewHolder(View view) {
 
@@ -122,7 +199,7 @@ public class MainActivity extends AppCompatActivity
             @Override
             public void onClick(View view) {
 
-                Log.d(TAG, "onClick");
+                //Log.d(TAG, "onClick");
 
                 int position = getLayoutPosition();
 
@@ -155,7 +232,7 @@ public class MainActivity extends AppCompatActivity
             @Override
             public boolean onLongClick(View view) {
 
-                Log.d(TAG, "onLongClick");
+                //Log.d(TAG, "onLongClick");
                 if (actionMode != null) {
                     return false;
                 }
@@ -188,28 +265,14 @@ public class MainActivity extends AppCompatActivity
             return ret;
         }
 
-        void removeFile(int idx) {
+        void removeFiles(ArrayList<File> toDelete) {
 
-            try {
-                dataSet.remove(idx);
-                notifyItemRemoved(idx);
-            } catch (IndexOutOfBoundsException e) {
-                e.printStackTrace();
-            }
+            dataSet.removeAll(toDelete);
+            notifyDataSetChanged();
         }
 
-        void removeSelectedFiles() {
+        void selectNone() {
 
-            for (int i = 0; i < dataSet.size(); i++) {
-
-                if (selectedPositions.get(i)) {
-                    dataSet.remove(i);
-                    notifyItemRemoved(i);
-                }
-            }
-        }
-
-        public void selectNone() {
             selectedPositions.clear();
             notifyDataSetChanged();
         }
@@ -241,8 +304,6 @@ public class MainActivity extends AppCompatActivity
             imageView.setImageBitmap(thumbnail);
 
             holder.itemView.setSelected(selectedPositions.get(position));
-
-            Log.d(TAG, "onBind: " + String.valueOf(holder.itemView.isSelected()));
         }
 
         @Override
@@ -250,168 +311,6 @@ public class MainActivity extends AppCompatActivity
             return dataSet.size();
         }
     }
-
-    private ServiceConnection serviceConnection = new ServiceConnection() {
-
-        @Override
-        public void onServiceConnected(ComponentName name, IBinder service) {
-
-            Log.d(TAG, "onServiceConnected");
-
-            RecordService.RecordServiceBinder binder = (RecordService.RecordServiceBinder) service;
-            recordService = binder.getService();
-
-            recordService.registerOnStartRecordCallback(onStartRecordCallback);
-            recordService.registerOnOrientationLockedCallback(onOrientationLockedCallback);
-            recordService.registerOnTipoverCallback(onTipoverCallback);
-            recordService.registerOnStopRecordCallback(onStopRecordCallback);
-        }
-
-        @Override
-        public void onServiceDisconnected(ComponentName name) {
-
-            Log.d(TAG, "onServiceDisconnected");
-
-            recordService = null;
-        }
-    };
-
-    /*
-     *  Callbacks for Google Android API
-     */
-    @Override
-    public void onConnected(@Nullable Bundle bundle) {
-
-        Log.d(TAG, "Google connected");
-    }
-
-    @Override
-    public void onConnectionSuspended(int i) {
-
-        Log.d(TAG, "Google disconnect");
-    }
-
-    @Override
-    public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
-
-        Log.e(TAG, "Google connect failed");
-
-        if (connectionResult.hasResolution()) {
-            try {
-                connectionResult.startResolutionForResult(this, ConnectionResult.RESOLUTION_REQUIRED);
-            } catch (IntentSender.SendIntentException e) {
-                // Unable to resolve, message user appropriately
-            }
-        } else {
-            GoogleApiAvailability.getInstance().getErrorDialog(this, connectionResult.getErrorCode(), 0).show();
-        }
-    }
-    /*
-     *  End of Google Android API callbacks
-     */
-
-    @Override
-    protected void onActivityResult(final int requestCode, final int resultCode, final Intent data) {
-
-        switch (requestCode) {
-            case ConnectionResult.RESOLUTION_REQUIRED:
-
-                if (resultCode == RESULT_OK) {
-
-                    Log.d(TAG, "Google connecting again");
-                    googleApiClient.connect();
-                } else {
-
-                    SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
-                    SharedPreferences.Editor editor = sharedPreferences.edit();
-                    editor.putBoolean(PreferenceActivity.KEY_PREF_BACKUP, false);
-                    editor.apply();
-                }
-                break;
-        }
-    }
-
-    private RecordService.OnStartRecordCallback onStartRecordCallback = new RecordService.OnStartRecordCallback() {
-
-        @Override
-        void onStartRecord() {
-
-            Log.d(TAG, "onStartRecordCallback");
-
-
-        }
-    };
-
-    private RecordService.OnOrientationLockedCallback onOrientationLockedCallback = new RecordService.OnOrientationLockedCallback() {
-
-        @Override
-        void onOrientationLocked() {
-            Toast.makeText(MainActivity.this, "Locked!", Toast.LENGTH_SHORT).show();
-        }
-    };
-
-    private RecordService.OnTipoverCallback onTipoverCallback = new RecordService.OnTipoverCallback() {
-
-        @Override
-        void onTipover() {
-            Toast.makeText(MainActivity.this, "Tipover!", Toast.LENGTH_SHORT).show();
-        }
-    };
-
-    Animator.AnimatorListener stopRecordingListener = new Animator.AnimatorListener() {
-        @Override
-        public void onAnimationStart(Animator animation) {
-
-        }
-
-        @Override
-        public void onAnimationEnd(Animator animation) {
-            View recordCard = findViewById(R.id.recordCard);
-            recordCard.setVisibility(View.GONE);
-
-            TransitionInflater transitionInflater = TransitionInflater.from(MainActivity.this);
-            Transition transition = transitionInflater.inflateTransition(R.transition.recording);
-            FrameLayout.LayoutParams layoutParams = new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            );
-            layoutParams.gravity = Gravity.BOTTOM | Gravity.END;
-            recordFab.setLayoutParams(layoutParams);
-            recordFab.setVisibility(View.VISIBLE);
-            ViewGroup container = (ViewGroup) findViewById(R.id.container);
-            TransitionManager.beginDelayedTransition(container, transition);
-        }
-
-        @Override
-        public void onAnimationCancel(Animator animation) {
-
-        }
-
-        @Override
-        public void onAnimationRepeat(Animator animation) {
-
-        }
-    };
-
-    private RecordService.OnStopRecordCallback onStopRecordCallback = new RecordService.OnStopRecordCallback() {
-
-        void onStopRecord() {
-
-            Log.d(TAG, "onStopRecord");
-            populateSavedFileList();
-            savedVideoListAdapter.notifyItemInserted(savedVideoListAdapter.getItemCount());
-
-            View recordCard = findViewById(R.id.recordCard);
-            int cx = recordCard.getWidth() / 2;
-            int cy = recordCard.getHeight() / 2;
-
-            float startRadius = (float) Math.hypot(cx, cy);
-
-            Animator anim = ViewAnimationUtils.createCircularReveal(recordCard, cx, cy, startRadius, 0);
-            anim.addListener(stopRecordingListener);
-
-            anim.start();
-        }
-    };
 
     private ActionMode.Callback actionModeCallback = new ActionMode.Callback() {
 
@@ -435,7 +334,7 @@ public class MainActivity extends AppCompatActivity
 
         // Called when the user selects a contextual menu item
         @Override
-        public boolean onActionItemClicked(final ActionMode mode, MenuItem item) {
+        public boolean onActionItemClicked(final ActionMode actionMode, MenuItem item) {
 
             final ArrayList<File> selectedFiles = savedVideoListAdapter.getSelectedFiles();
             if (selectedFiles.isEmpty()) {
@@ -453,15 +352,21 @@ public class MainActivity extends AppCompatActivity
                                 @Override
                                 public void onClick(DialogInterface dialog, int which) {
 
+                                    ArrayList<File> deletedFiles = new ArrayList<>();
+
                                     for (int i = 0; i < selectedFiles.size(); i++) {
 
-                                        if (selectedFiles.get(i).delete()) {
-                                            savedVideoListAdapter.removeFile(i);
+                                        File file = selectedFiles.get(i);
+
+                                        if (file.delete()) {
+                                            //Log.d(TAG, "deleted " + file.getName());
+                                            deletedFiles.add(file);
                                         } else {
-                                            Snackbar.make(findViewById(R.id.coordinator_layout), R.string.error_deleting, Snackbar.LENGTH_LONG).show();
+                                            Snackbar.make(findViewById(R.id.coordinatorLayout), R.string.error_deleting, Snackbar.LENGTH_LONG).show();
                                         }
                                     }
-                                    mode.finish(); // Action picked, so close the CAB
+                                    savedVideoListAdapter.removeFiles(deletedFiles);
+                                    actionMode.finish(); // Action picked, so close the CAB
                                 }
                             })
                             .setNegativeButton(android.R.string.no, null)
@@ -471,12 +376,8 @@ public class MainActivity extends AppCompatActivity
 
                     if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
 
-                        if (isExternalStorageWritable()) {
-                            saveFilesToExternalStorage(selectedFiles);
-                        } else {
-                            Snackbar.make(findViewById(R.id.coordinator_layout), R.string.no_external_storage, Snackbar.LENGTH_LONG).show();
-                        }
-                        mode.finish();
+                        saveFilesToExternalStorage(selectedFiles);
+                        actionMode.finish();
                     } else {
                         ActivityCompat.requestPermissions(MainActivity.this, new String[] { Manifest.permission.WRITE_EXTERNAL_STORAGE }, PERM_REQUEST_STORAGE);
                     }
@@ -497,34 +398,18 @@ public class MainActivity extends AppCompatActivity
         }
     };
 
-    boolean isExternalStorageWritable() {
-        String state = Environment.getExternalStorageState();
-        return Environment.MEDIA_MOUNTED.equals(state);
-    }
+    public void fabClick(View view) {
 
-    void saveFilesToExternalStorage(ArrayList<File> files) {
-
-        for (File srcFile : files) {
-
-            File dstFile = new File(getApplicationContext().getExternalFilesDir(Environment.DIRECTORY_MOVIES), srcFile.getName());
-
-            try {
-                FileChannel inChannel = new FileInputStream(srcFile).getChannel();
-                FileChannel outChannel = new FileOutputStream(dstFile).getChannel();
-
-                try {
-                    inChannel.transferTo(0, inChannel.size(), outChannel);
-                } finally {
-
-                    if (inChannel != null) {
-                        inChannel.close();
-                    }
-                    outChannel.close();
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
+        TransitionInflater transitionInflater = TransitionInflater.from(this);
+        Transition transition = transitionInflater.inflateTransition(R.transition.recording);
+        transition.addListener(startRecordingListener);
+        CoordinatorLayout.LayoutParams layoutParams = new CoordinatorLayout.LayoutParams(
+                CoordinatorLayout.LayoutParams.WRAP_CONTENT, CoordinatorLayout.LayoutParams.WRAP_CONTENT
+        );
+        layoutParams.gravity = Gravity.CENTER;
+        recordFab.setLayoutParams(layoutParams);
+        ViewGroup container = (ViewGroup) findViewById(R.id.coordinatorLayout);
+        TransitionManager.beginDelayedTransition(container, transition);
     }
 
     Transition.TransitionListener startRecordingListener = new Transition.TransitionListener() {
@@ -545,8 +430,37 @@ public class MainActivity extends AppCompatActivity
             float finalRadius = (float) Math.hypot(cx, cy);
 
             Animator anim = ViewAnimationUtils.createCircularReveal(recordCard, cx, cy, 0, finalRadius);
+            anim.addListener(new Animator.AnimatorListener() {
+                @Override
+                public void onAnimationStart(Animator animation) {
+
+                }
+
+                @Override
+                public void onAnimationEnd(Animator animation) {
+                    startRecording();
+                }
+
+                @Override
+                public void onAnimationCancel(Animator animation) {
+
+                }
+
+                @Override
+                public void onAnimationRepeat(Animator animation) {
+
+                }
+            });
 
             recordCard.setVisibility(View.VISIBLE);
+            recordCard.setElevation(24);
+
+            View dimOverlay = findViewById(R.id.dimOverlay);
+            dimOverlay.setVisibility(View.VISIBLE);
+            dimOverlay.setElevation(20);
+            dimOverlay.setClickable(true);
+            //Log.d(TAG, "dimOverlay clickable: " + String.valueOf(dimOverlay.isClickable()));
+
             anim.start();
         }
 
@@ -566,35 +480,196 @@ public class MainActivity extends AppCompatActivity
         }
     };
 
-    public void fabClick(View view) {
+    public void stopRecordSaveClick(View view) {
 
-        TransitionInflater transitionInflater = TransitionInflater.from(this);
-        Transition transition = transitionInflater.inflateTransition(R.transition.recording);
-        transition.addListener(startRecordingListener);
-        FrameLayout.LayoutParams layoutParams = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        layoutParams.gravity = Gravity.CENTER;
-        recordFab.setLayoutParams(layoutParams);
-        ViewGroup container = (ViewGroup) findViewById(R.id.container);
-        TransitionManager.beginDelayedTransition(container, transition);
-
-        startRecording();
+        recordService.stopRecording();
     }
 
-    public void recordCardClick(View view) {
+    public void stopRecordDiscardClick(View view) {
+
+        new AlertDialog.Builder(MainActivity.this)
+                .setTitle(R.string.discard_confirm_title)
+                .setMessage(R.string.discard_confirm_text)
+                .setIcon(android.R.drawable.ic_dialog_alert)
+                .setPositiveButton(android.R.string.yes, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+
+                        recordService.discardRecording();
+                    }
+                })
+                .setNegativeButton(android.R.string.no, null)
+                .show();
+    }
+
+    private RecordService.OnStartRecordCallback onStartRecordCallback = new RecordService.OnStartRecordCallback() {
+
+        @Override
+        void onStartRecord() {
+
+            TextView textView = (TextView) findViewById(R.id.recordStatus);
+            textView.setText(getResources().getString(R.string.recording_popup_status));
+
+            textView = (TextView) findViewById(R.id.orientationStatus);
+            textView.setText(getResources().getString(R.string.recording_popup_unoriented));
+
+            Button button = (Button) findViewById(R.id.recordingSave);
+            button.setEnabled(true);
+
+            button = (Button) findViewById(R.id.recordingDiscard);
+            button.setEnabled(true);
+        }
+    };
+
+    private RecordService.OnOrientationLockedCallback onOrientationLockedCallback = new RecordService.OnOrientationLockedCallback() {
+
+        @Override
+        void onOrientationLocked(RecordService.DownAxis downAxis) {
+
+            Resources resources = getResources();
+            TextView textView = (TextView) findViewById(R.id.orientationStatus);
+            textView.setText(resources.getString(R.string.recording_popup_orientation_locked));
+        }
+    };
+
+    private RecordService.OnTipoverCallback onTipoverCallback = new RecordService.OnTipoverCallback() {
+
+        @Override
+        void onTipover() {
+
+            TextView textView = (TextView) findViewById(R.id.orientationStatus);
+            textView.setText(getResources().getString(R.string.recording_popup_tipover));
+        }
+
+        @Override
+        void onRight() {
+
+            TextView textView = (TextView) findViewById(R.id.orientationStatus);
+            textView.setText(getResources().getString(R.string.recording_popup_orientation_locked));
+        }
+    };
+
+    private RecordService.OnStopRecordCallback onStopRecordCallback = new RecordService.OnStopRecordCallback() {
+
+        void onStopRecord() {
+
+            //Log.d(TAG, "onStopRecord");
+            populateSavedFileList();
+            savedVideoListAdapter.notifyItemInserted(savedVideoListAdapter.getItemCount());
+
+            View recordCard = findViewById(R.id.recordCard);
+            int cx = recordCard.getWidth() / 2;
+            int cy = recordCard.getHeight() / 2;
+
+            float startRadius = (float) Math.hypot(cx, cy);
+
+            Animator anim = ViewAnimationUtils.createCircularReveal(recordCard, cx, cy, startRadius, 0);
+            anim.addListener(stopRecordingListener);
+
+            View dimOverlay = findViewById(R.id.dimOverlay);
+            dimOverlay.setVisibility(View.GONE);
+
+            anim.start();
+        }
+    };
+
+    Animator.AnimatorListener stopRecordingListener = new Animator.AnimatorListener() {
+        @Override
+        public void onAnimationStart(Animator animation) {
+
+        }
+
+        @Override
+        public void onAnimationEnd(Animator animation) {
+
+            findViewById(R.id.recordCard).setVisibility(View.GONE);
+
+            TextView textView = (TextView) findViewById(R.id.recordStatus);
+            textView.setText(getResources().getString(R.string.recording_popup_ellipsis));
+
+            textView = (TextView) findViewById(R.id.orientationStatus);
+            textView.setText(getResources().getString(R.string.recording_popup_unoriented));
+
+            Button button = (Button) findViewById(R.id.recordingSave);
+            button.setEnabled(false);
+
+            button = (Button) findViewById(R.id.recordingDiscard);
+            button.setEnabled(false);
+
+            TransitionInflater transitionInflater = TransitionInflater.from(MainActivity.this);
+            Transition transition = transitionInflater.inflateTransition(R.transition.recording);
+            CoordinatorLayout.LayoutParams layoutParams = new CoordinatorLayout.LayoutParams(
+                    CoordinatorLayout.LayoutParams.WRAP_CONTENT, CoordinatorLayout.LayoutParams.WRAP_CONTENT
+            );
+            layoutParams.gravity = Gravity.BOTTOM | Gravity.END;
+            float margin = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 16, getResources().getDisplayMetrics());
+            layoutParams.setMargins(0, 0, (int) margin, (int) margin);
+            recordFab.setLayoutParams(layoutParams);
+            recordFab.setVisibility(View.VISIBLE);
+            ViewGroup container = (ViewGroup) findViewById(R.id.coordinatorLayout);
+            TransitionManager.beginDelayedTransition(container, transition);
+        }
+
+        @Override
+        public void onAnimationCancel(Animator animation) {
+
+        }
+
+        @Override
+        public void onAnimationRepeat(Animator animation) {
+
+        }
+    };
+
+    boolean isExternalStorageWritable() {
+        String state = Environment.getExternalStorageState();
+        return Environment.MEDIA_MOUNTED.equals(state);
+    }
+
+    void saveFilesToExternalStorage(ArrayList<File> files) {
+
+        if (isExternalStorageWritable()) {
+
+            for (File srcFile : files) {
+
+                //Log.d(TAG, "Saving " + srcFile.getName());
+
+                File dstFile = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), srcFile.getName());
+
+                try {
+                    FileChannel inChannel = new FileInputStream(srcFile).getChannel();
+                    FileChannel outChannel = new FileOutputStream(dstFile).getChannel();
+
+                    try {
+                        //Log.d(TAG, "Size: " + String.valueOf(inChannel.size()));
+                        inChannel.transferTo(0, inChannel.size(), outChannel);
+                    } finally {
+
+                        if (inChannel != null) {
+                            inChannel.close();
+                        }
+                        outChannel.close();
+                        //Log.d(TAG, "New file: " + dstFile.getAbsolutePath());
+                    }
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        } else {
+            Snackbar.make(findViewById(R.id.coordinatorLayout), R.string.no_external_storage, Snackbar.LENGTH_LONG).show();
+        }
     }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
 
-        Log.d(TAG, "onCreate");
+        //Log.d(TAG, "onCreate");
 
         super.onCreate(savedInstanceState);
         getWindow().requestFeature(Window.FEATURE_CONTENT_TRANSITIONS);
         setContentView(R.layout.activity_main);
 
-        toolbar = (Toolbar) findViewById(R.id.mainToolbar);
+        Toolbar toolbar = (Toolbar) findViewById(R.id.mainToolbar);
         setSupportActionBar(toolbar);
 
         populateSavedFileList();
@@ -617,13 +692,13 @@ public class MainActivity extends AppCompatActivity
 
     /*@Override
     public void onCreateContextMenu(ContextMenu contextMenu, View view, ContextMenu.ContextMenuInfo menuInfo) {
-        Log.d(TAG, "context menu");
+        //Log.d(TAG, "context menu");
     }*/
 
     @Override
     public void onDestroy() {
 
-        Log.d(TAG, "onDestroy");
+        //Log.d(TAG, "onDestroy");
         unbindService(serviceConnection);
         super.onDestroy();
     }
@@ -717,7 +792,7 @@ public class MainActivity extends AppCompatActivity
 
     static void restartGoogleApiClient(Activity activity) {
 
-        Log.d(TAG, "restartGoogleApiClient");
+        //Log.d(TAG, "restartGoogleApiClient");
 
         if (googleApiClient != null && googleApiClient.isConnected()) {
             googleApiClient.disconnect();
@@ -731,12 +806,12 @@ public class MainActivity extends AppCompatActivity
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(activity);
 
         if (sharedPreferences.getBoolean(PreferenceActivity.KEY_PREF_LOCATION, false)) {
-            Log.d(TAG, "Adding Location API");
+            //Log.d(TAG, "Adding Location API");
             builder.addApi(LocationServices.API);
             worthIt = true;
         }
         if (sharedPreferences.getBoolean(PreferenceActivity.KEY_PREF_BACKUP, false)) {
-            Log.d(TAG, "Adding Drive API");
+            //Log.d(TAG, "Adding Drive API");
             builder.addApi(Drive.API).addScope(Drive.SCOPE_FILE);
             worthIt = true;
         }
@@ -771,8 +846,8 @@ public class MainActivity extends AppCompatActivity
                 return true;
             case R.id.clearVideos:
                 for (File file : this.getFilesDir().listFiles(mp4Filter)) {
-                    Log.d(TAG, file.getName());
-                    Log.d(TAG, String.valueOf(file.delete()));
+                    //Log.d(TAG, file.getName());
+                    //Log.d(TAG, String.valueOf(file.delete()));
                 }
                 populateSavedFileList();
                 savedVideoListAdapter.notifyDataSetChanged();
@@ -806,7 +881,7 @@ public class MainActivity extends AppCompatActivity
                     startRecording();
                 } else {
 
-                    Snackbar.make(findViewById(R.id.coordinator_layout), R.string.camera_permission_note, Snackbar.LENGTH_LONG).show();
+                    Snackbar.make(findViewById(R.id.coordinatorLayout), R.string.camera_permission_note, Snackbar.LENGTH_LONG).show();
                     /*if (ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
                         Snackbar snackbar = Snackbar.make(findViewById(R.id.coordinator_layout), R.string.storage_permission_note, Snackbar.LENGTH_LONG);
                         snackbar.show();
@@ -819,9 +894,10 @@ public class MainActivity extends AppCompatActivity
                         && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
 
                     saveFilesToExternalStorage(savedVideoListAdapter.getSelectedFiles());
+                    actionMode.finish();
                 } else {
 
-                    Snackbar.make(findViewById(R.id.coordinator_layout), R.string.storage_permission_note, Snackbar.LENGTH_LONG).show();
+                    Snackbar.make(findViewById(R.id.coordinatorLayout), R.string.storage_permission_note, Snackbar.LENGTH_LONG).show();
                 }
                 break;
         }

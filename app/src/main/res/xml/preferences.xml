@@ -4,7 +4,7 @@
         android:title="@string/pref_cat_recording"
         android:key="pref_cat_recording">
         <ListPreference
-            android:defaultValue="30"
+            android:defaultValue="10"
             android:entries="@array/pref_duration_entries"
             android:entryValues="@array/pref_duration_entry_values"
             android:key="pref_duration"

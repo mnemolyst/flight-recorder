@@ -1,8 +1,24 @@
-<resources>
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+
+    <!-- Strings related to main activity -->
+
     <string name="app_name">Flight Recorder</string>
     <string name="notification_title">Recording</string>
     <string name="notification_message">Recording Video</string>
-    <string name="videoThumbnail">Video Thumbnail</string>
+    <string name="video_thumbnail">Video Thumbnail</string>
+
+    <!-- Strings related to the recording popup -->
+
+    <string name="recording_popup_ellipsis">&#8230;</string>
+    <string name="recording_popup_status">Recording</string>
+    <string name="recording_popup_unoriented">Unoriented</string>
+    <string name="recording_popup_orientation_locked">Orientation locked</string>
+    <string name="recording_popup_tipover">Tipover</string>
+    <string name="recording_popup_save">Save</string>
+    <string name="recording_popup_discard">Discard</string>
+
+    <string name="discard_confirm_title">Really discard?</string>
+    <string name="discard_confirm_text">Are you sure you want to discard the current recording?</string>
 
     <!-- Strings related to the main menu -->
 
@@ -25,16 +41,16 @@
 
     <string name="pref_duration_title">Record duration</string>
     <string-array name="pref_duration_entries">
+        <item>5 seconds</item>
         <item>10 seconds</item>
         <item>30 seconds</item>
         <item>1 minute</item>
-        <item>2 minutes</item>
     </string-array>
     <string-array name="pref_duration_entry_values">
+        <item>5</item>
         <item>10</item>
         <item>30</item>
         <item>60</item>
-        <item>120</item>
     </string-array>
 
     <string name="pref_video_quality_title">Video quality</string>
@@ -89,7 +105,7 @@
 
     <string name="camera_permission_note">Camera permission is required for operation.</string>
     <string name="storage_permission_note">External Storage permission is required for this action.</string>
-    <string name="error_deleting">There was an error deleting the selected file.</string>
+    <string name="error_deleting">There was an error deleting a selected file.</string>
     <string name="no_external_storage">External storage unavailable.</string>
 
 </resources>

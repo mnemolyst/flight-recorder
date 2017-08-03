@@ -114,6 +114,8 @@ public class RecordService extends Service {
     private ArrayList<BufferDataInfoPair> audioBufferList = new ArrayList<>();
     private File internalFile;
 
+    private boolean saveRecording = true;
+
     private boolean recordAudio = true;
     private AudioRecord audioRecord;
     private int audioSampleRate = 48000;
@@ -155,11 +157,14 @@ public class RecordService extends Service {
     }
 
     static abstract class OnOrientationLockedCallback {
-        abstract void onOrientationLocked();
+        abstract void onOrientationLocked(DownAxis downAxis);
     }
 
     static abstract class OnTipoverCallback {
+
         abstract void onTipover();
+
+        abstract void onRight();
     }
 
     static abstract class OnStopRecordCallback {
@@ -263,7 +268,7 @@ public class RecordService extends Service {
     @Override
     public void onCreate() {
 
-        Log.d(TAG, "onCreate");
+       //Log.d(TAG, "onCreate");
 
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
         PreferenceActivity.updateServiceFromPrefs(sharedPreferences, getResources());
@@ -278,7 +283,7 @@ public class RecordService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
 
-        Log.d(TAG, "onStartCommand");
+       //Log.d(TAG, "onStartCommand");
 
         recordState = RecordState.STOPPED;
         startRecording();
@@ -289,21 +294,21 @@ public class RecordService extends Service {
     @Override
     public IBinder onBind(Intent intent) {
 
-        Log.d(TAG, "onBind");
+       //Log.d(TAG, "onBind");
         return new RecordServiceBinder();
     }
 
     @Override
     public boolean onUnbind(Intent intent) {
 
-        Log.d(TAG, "onUnbind");
+       //Log.d(TAG, "onUnbind");
         return false;
     }
 
     @Override
     public void onDestroy() {
 
-        Log.d(TAG, "onDestroy");
+       //Log.d(TAG, "onDestroy");
         releaseResources();
 
         videoDb.close();
@@ -312,19 +317,21 @@ public class RecordService extends Service {
 
     private void startRecording() {
 
-        Log.d(TAG, "startRecording");
+       //Log.d(TAG, "startRecording");
 
         new Thread(new Runnable() {
 
             public void run() {
 
                 if (ActivityCompat.checkSelfPermission(RecordService.this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_DENIED) {
-                    Log.e(TAG, "No camera permission!");
+                   //Log.e(TAG, "No camera permission!");
                     stopSelf();
                     return;
                 }
 
                 recordAudio = ActivityCompat.checkSelfPermission(RecordService.this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+
+                saveRecording = true;
 
                 CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
 
@@ -354,7 +361,7 @@ public class RecordService extends Service {
         @Override
         public void onOpened(@NonNull CameraDevice camera) {
 
-            Log.d(TAG, "cameraStateCallback.onOpened");
+           //Log.d(TAG, "cameraStateCallback.onOpened");
 
             cameraDevice = camera;
             recordState = RecordState.STARTING;
@@ -364,14 +371,14 @@ public class RecordService extends Service {
         @Override
         public void onDisconnected(@NonNull CameraDevice camera) {
 
-            Log.d(TAG, "cameraStateCallback.onDisconnected");
+           //Log.d(TAG, "cameraStateCallback.onDisconnected");
             cameraStopped();
         }
 
         @Override
         public void onError(@NonNull CameraDevice camera, int error) {
 
-            Log.e(TAG, "cameraStateCallback.onError");
+           //Log.e(TAG, "cameraStateCallback.onError");
             stopSelf();
         }
     };
@@ -413,7 +420,7 @@ public class RecordService extends Service {
         } else if (videoQuality == VideoQuality.MED_720P) {
             format = MediaFormat.createVideoFormat("video/avc", 1280, 720);
         } else {
-            Log.e(TAG, "No suitable video resolution found.");
+           //Log.e(TAG, "No suitable video resolution found.");
             stopSelf();
             return;
         }
@@ -437,7 +444,7 @@ public class RecordService extends Service {
     private void startCamera() {
 
         if (cameraDevice == null) {
-            Log.e(TAG, "cameraDevice is null");
+           //Log.e(TAG, "cameraDevice is null");
             stopSelf();
             return;
         }
@@ -473,14 +480,14 @@ public class RecordService extends Service {
 
         @Override
         public void onConfigureFailed(@NonNull CameraCaptureSession session) {
-            Log.e(TAG, "captureSessionStateCallback.onConfigureFailed");
+           //Log.e(TAG, "captureSessionStateCallback.onConfigureFailed");
             stopSelf();
         }
 
         @Override
         public void onClosed(@NonNull CameraCaptureSession session) {
 
-            Log.d(TAG, "captureSessionStateCallback.onClosed");
+           //Log.d(TAG, "captureSessionStateCallback.onClosed");
             cameraStopped();
         }
     };
@@ -514,7 +521,7 @@ public class RecordService extends Service {
         if (audioRecord.getState() == AudioRecord.STATE_INITIALIZED) {
             audioRecord.startRecording();
         } else {
-            Log.e(TAG, "audioRecord uninitialized");
+           //Log.e(TAG, "audioRecord uninitialized");
         }
     }
 
@@ -541,7 +548,7 @@ public class RecordService extends Service {
 
                 // Once video capture begins, start audio capture.
                 if (recordAudio && audioRecord.getState() == AudioRecord.STATE_INITIALIZED) {
-                    Log.d(TAG, "Starting audio codec");
+                   //Log.d(TAG, "Starting audio codec");
                     audioCodec.start();
                 }
             }
@@ -591,23 +598,23 @@ public class RecordService extends Service {
             }
 
             if ((info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) == MediaCodec.BUFFER_FLAG_END_OF_STREAM) {
-                Log.d(TAG, "videoCodec EOS");
+               //Log.d(TAG, "videoCodec EOS");
             }
         }
 
         @Override
         public void onError(@NonNull MediaCodec codec, @NonNull MediaCodec.CodecException e) {
-            Log.e(TAG, "MediaCodec.Callback.onError", e);
+           //Log.e(TAG, "MediaCodec.Callback.onError", e);
         }
 
         @Override
         public void onOutputFormatChanged(@NonNull MediaCodec codec, @NonNull MediaFormat format) {
 
             if (videoFormat == null) {
-                Log.d(TAG, "Video format changed");
+               //Log.d(TAG, "Video format changed");
                 videoFormat = format;
             } else {
-                Log.e(TAG, "Video format already changed");
+               //Log.e(TAG, "Video format already changed");
             }
         }
     };
@@ -619,7 +626,7 @@ public class RecordService extends Service {
 
             switch (recordState) {
                 case STARTING:
-                    Log.e(TAG, "Audio input buffer dequeued when recordState = STARTING");
+                   //Log.e(TAG, "Audio input buffer dequeued when recordState = STARTING");
                     break;
                 case STARTED:
                     ByteBuffer inputBuffer = null;
@@ -697,10 +704,10 @@ public class RecordService extends Service {
         public void onOutputFormatChanged(@NonNull MediaCodec codec, @NonNull MediaFormat format) {
 
             if (audioFormat == null) {
-                Log.d(TAG, "Audio format changed");
+               //Log.d(TAG, "Audio format changed");
                 audioFormat = format;
             } else {
-                Log.e(TAG, "Audio format already changed");
+               //Log.e(TAG, "Audio format already changed");
             }
         }
     };
@@ -766,12 +773,12 @@ public class RecordService extends Service {
         public void onSensorChanged(SensorEvent event) {
 
             /*for (float i : event.values) {
-                Log.d(TAG, String.valueOf(i));
+               //Log.d(TAG, String.valueOf(i));
             }
-            Log.d(TAG, "ol: " + String.valueOf(orientationLocked));
-            Log.d(TAG, "da: " + String.valueOf(downAxis));
-            Log.d(TAG, "tad: " + String.valueOf(timeAxisDown));
-            Log.d(TAG, "diff: " + String.valueOf(event.timestamp - timeAxisDown));*/
+           //Log.d(TAG, "ol: " + String.valueOf(orientationLocked));
+           //Log.d(TAG, "da: " + String.valueOf(downAxis));
+           //Log.d(TAG, "tad: " + String.valueOf(timeAxisDown));
+           //Log.d(TAG, "diff: " + String.valueOf(event.timestamp - timeAxisDown));*/
 
             if (orientationLocked) {
 
@@ -800,6 +807,8 @@ public class RecordService extends Service {
                         downAxis = DownAxis.NONE;
                     }
                 } else { /* not tipped */
+
+                    onTipoverCallback.onRight();
 
                     tippedButLocked = false;
                     timeTipped = event.timestamp;
@@ -845,7 +854,7 @@ public class RecordService extends Service {
                     orientationLocked = true;
 
                     if (onOrientationLockedCallback != null) {
-                        onOrientationLockedCallback.onOrientationLocked();
+                        onOrientationLockedCallback.onOrientationLocked(downAxis);
                     }
                 }
             }
@@ -876,9 +885,15 @@ public class RecordService extends Service {
         return recordState;
     }
 
+    void discardRecording() {
+
+        saveRecording = false;
+        stopRecording();
+    }
+
     void stopRecording() {
 
-        Log.d(TAG, "stopRecording");
+       //Log.d(TAG, "stopRecording");
 
         if (recordState.equals(RecordState.STARTED)) {
 
@@ -897,7 +912,7 @@ public class RecordService extends Service {
 
     private void cameraStopped() {
 
-        Log.d(TAG, "cameraStopped");
+       //Log.d(TAG, "cameraStopped");
         releaseResources();
 
         if (recordState.equals(RecordState.STARTED)) {
@@ -924,7 +939,9 @@ public class RecordService extends Service {
             location = null;
         }
 
-        boolean saved = dumpBuffersToFile();
+        if (saveRecording) {
+            boolean saved = dumpBuffersToFile();
+        }
 
         if (onStopRecordCallback != null) {
             onStopRecordCallback.onStopRecord();
@@ -961,7 +978,7 @@ public class RecordService extends Service {
         }
 
         if (videoFormat == null) {
-            Log.d(TAG, "null videoFormat");
+           //Log.d(TAG, "null videoFormat");
             stopSelf();
             return false;
         }
@@ -1089,7 +1106,7 @@ public class RecordService extends Service {
         @Override
         public void onResult(@NonNull DriveApi.DriveContentsResult driveContentsResult) {
 
-            Log.d(TAG, "driveContentsCallback.onResult");
+           //Log.d(TAG, "driveContentsCallback.onResult");
 
             DriveContents driveContents = driveContentsResult.getDriveContents();
 
@@ -1111,7 +1128,7 @@ public class RecordService extends Service {
             }
 
             MetadataChangeSet changeSet = new MetadataChangeSet.Builder()
-                    .setTitle("Test Recording.mp4")
+                    .setTitle(internalFile.getName())
                     .setMimeType("video/mp4").build();
 
             Drive.DriveApi.getRootFolder(MainActivity.googleApiClient).createFile(MainActivity.googleApiClient, changeSet, driveContents);
@@ -1149,12 +1166,12 @@ public class RecordService extends Service {
     }
 
     public static void setRecordDuration(int recordDuration) {
-        Log.d(TAG, "setRecordDuration: " + String.valueOf(recordDuration));
+       //Log.d(TAG, "setRecordDuration: " + String.valueOf(recordDuration));
         RecordService.recordDuration = recordDuration * 1_000_000;
     }
 
     public static void setVideoQuality(String pref, String q1080p, String q720p) {
-        Log.d(TAG, "setVideoQuality: " + pref);
+       //Log.d(TAG, "setVideoQuality: " + pref);
         if (pref.equals(q1080p)) {
             RecordService.videoQuality = VideoQuality.HIGH_1080P;
         } else if (pref.equals(q720p)) {
@@ -1163,12 +1180,12 @@ public class RecordService extends Service {
     }
 
     public static void setSaveOnTipover(boolean saveOnTipover) {
-        Log.d(TAG, "setSaveOnTipover: " + String.valueOf(saveOnTipover));
+       //Log.d(TAG, "setSaveOnTipover: " + String.valueOf(saveOnTipover));
         RecordService.saveOnTipover = saveOnTipover;
     }
 
     public static void setTipoverThreshold(String pref, String low, String medium, String high) {
-        Log.d(TAG, "setTipoverThreshold: " + pref);
+       //Log.d(TAG, "setTipoverThreshold: " + pref);
         if (pref.equals(low)) {
 //            RecordService.tipoverThreshold = TipoverThreshold.LOW;
             gThreshold = G_THRESHOLD_LOW;
@@ -1182,17 +1199,17 @@ public class RecordService extends Service {
     }
 
     public static void setTipoverTimeout(int tipoverTimeout) {
-        Log.d(TAG, "setTipoverTimeout: " + String.valueOf(tipoverTimeout));
+       //Log.d(TAG, "setTipoverTimeout: " + String.valueOf(tipoverTimeout));
         RecordService.tipoverTimeout = tipoverTimeout * 1_000_000_000;
     }
 
     public static void setSaveLocation(boolean saveLocation) {
-        Log.d(TAG, "setSaveLocation: " + String.valueOf(saveLocation));
+       //Log.d(TAG, "setSaveLocation: " + String.valueOf(saveLocation));
         RecordService.saveLocation = saveLocation;
     }
 
     public static void setBackupToDrive(boolean backupToDrive) {
-        Log.d(TAG, "setBackupToDrive: " + String.valueOf(backupToDrive));
+       //Log.d(TAG, "setBackupToDrive: " + String.valueOf(backupToDrive));
         RecordService.backupToDrive = backupToDrive;
     }
 }
