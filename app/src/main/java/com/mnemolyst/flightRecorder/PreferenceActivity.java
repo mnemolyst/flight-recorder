@@ -37,6 +37,7 @@ public class PreferenceActivity extends AppCompatActivity implements GoogleApiCl
     private static final String TAG = "PreferenceActivity";
     static final String KEY_PREF_DURATION = "pref_duration";
     static final String KEY_PREF_VIDEO_QUALITY = "pref_video_quality";
+    static final String KEY_PREF_CAMERA = "pref_camera";
     static final String KEY_PREF_TIPOVER = "pref_tipover";
     static final String KEY_PREF_TIPOVER_THRESHOLD = "pref_tipover_threshold";
     static final String KEY_PREF_TIPOVER_TIMEOUT = "pref_tipover_timeout";
@@ -165,6 +166,11 @@ public class PreferenceActivity extends AppCompatActivity implements GoogleApiCl
         prefOpt2 = resources.getString(R.string.pref_video_quality_720p);
         prefDefault = resources.getString(R.string.pref_video_quality_default);
         RecordService.setVideoQuality(sharedPreferences.getString(KEY_PREF_VIDEO_QUALITY, prefDefault), prefOpt1, prefOpt2);
+
+        prefOpt1 = resources.getString(R.string.pref_camera_back);
+        prefOpt2 = resources.getString(R.string.pref_camera_front);
+        prefDefault = resources.getString(R.string.pref_camera_default);
+        RecordService.setCamera(sharedPreferences.getString(KEY_PREF_CAMERA, prefDefault), prefOpt1, prefOpt2);
 
         RecordService.setSaveOnTipover(sharedPreferences.getBoolean(KEY_PREF_TIPOVER, true));
 

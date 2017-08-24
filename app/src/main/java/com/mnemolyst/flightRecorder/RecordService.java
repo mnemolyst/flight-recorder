@@ -94,12 +94,16 @@ public class RecordService extends Service {
     enum VideoQuality {
         HIGH_1080P, MED_720P
     }
+    enum Camera {
+        BACK, FRONT
+    }
     enum TipoverThreshold {
         LOW, MEDIUM, HIGH
     }
     private RecordState recordState = RecordState.STOPPED;
     private DownAxis downAxis = DownAxis.NONE;
     private static VideoQuality videoQuality;
+    private static Camera camera;
 //    private static TipoverThreshold tipoverThreshold;
     private static int tipoverTimeout;
     private CameraDevice cameraDevice;
@@ -341,7 +345,9 @@ public class RecordService extends Service {
                     for (String id : cameraIdList) {
 
                         CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(id);
-                        if (characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK) {
+                        int lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING);
+                        if ((lensFacing == CameraCharacteristics.LENS_FACING_BACK && camera.equals(Camera.BACK))
+                                || (lensFacing == CameraCharacteristics.LENS_FACING_BACK && camera.equals(Camera.FRONT))) {
 
                             sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
 
@@ -1128,7 +1134,7 @@ public class RecordService extends Service {
             }
 
             MetadataChangeSet changeSet = new MetadataChangeSet.Builder()
-                    .setTitle(internalFile.getName())
+                    .setTitle("Flight recording " + internalFile.getName())
                     .setMimeType("video/mp4").build();
 
             Drive.DriveApi.getRootFolder(MainActivity.googleApiClient).createFile(MainActivity.googleApiClient, changeSet, driveContents);
@@ -1176,6 +1182,15 @@ public class RecordService extends Service {
             RecordService.videoQuality = VideoQuality.HIGH_1080P;
         } else if (pref.equals(q720p)) {
             RecordService.videoQuality = VideoQuality.MED_720P;
+        }
+    }
+
+    public static void setCamera(String pref, String back, String front) {
+
+        if (pref.equals(back)) {
+            RecordService.camera = Camera.BACK;
+        } else if (pref.equals(front)) {
+            RecordService.camera = Camera.FRONT;
         }
     }
 
