@@ -844,13 +844,6 @@ public class MainActivity extends AppCompatActivity
                 intent = new Intent(MainActivity.this, AboutActivity.class);
                 startActivity(intent);
                 return true;
-            case R.id.clearVideos:
-                for (File file : this.getFilesDir().listFiles(mp4Filter)) {
-                    //Log.d(TAG, file.getName());
-                    //Log.d(TAG, String.valueOf(file.delete()));
-                }
-                populateSavedFileList();
-                savedVideoListAdapter.notifyDataSetChanged();
             default:
                 return super.onOptionsItemSelected(menuItem);
         }

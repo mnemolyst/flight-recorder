@@ -347,7 +347,7 @@ public class RecordService extends Service {
                         CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(id);
                         int lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING);
                         if ((lensFacing == CameraCharacteristics.LENS_FACING_BACK && camera.equals(Camera.BACK))
-                                || (lensFacing == CameraCharacteristics.LENS_FACING_BACK && camera.equals(Camera.FRONT))) {
+                                || (lensFacing == CameraCharacteristics.LENS_FACING_FRONT && camera.equals(Camera.FRONT))) {
 
                             sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
 
