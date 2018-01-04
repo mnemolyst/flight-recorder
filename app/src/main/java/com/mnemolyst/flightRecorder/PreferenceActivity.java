@@ -21,7 +21,7 @@ import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.ActionBar;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
-import android.util.Log;
+//import android.util.Log;
 
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GoogleApiAvailability;
@@ -180,7 +180,7 @@ public class PreferenceActivity extends AppCompatActivity implements GoogleApiCl
         prefDefault = resources.getString(R.string.pref_tipover_threshold_default);
         RecordService.setTipoverThreshold(sharedPreferences.getString(KEY_PREF_TIPOVER_THRESHOLD, prefDefault), prefOpt1, prefOpt2, prefOpt3);
 
-        RecordService.setTipoverTimeout(Integer.valueOf(sharedPreferences.getString(KEY_PREF_TIPOVER_TIMEOUT, "0")));
+        RecordService.setTipoverTimeout(Long.valueOf(sharedPreferences.getString(KEY_PREF_TIPOVER_TIMEOUT, "0")));
 
         RecordService.setSaveLocation(sharedPreferences.getBoolean(KEY_PREF_LOCATION, false));
     }

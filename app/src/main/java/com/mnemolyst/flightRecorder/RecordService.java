@@ -13,7 +13,6 @@ import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
-import android.graphics.Bitmap;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -34,16 +33,13 @@ import android.media.MediaCodecList;
 import android.media.MediaFormat;
 import android.media.MediaMuxer;
 import android.media.MediaRecorder;
-import android.media.ThumbnailUtils;
 import android.os.Binder;
-import android.os.Environment;
 import android.os.IBinder;
 import android.preference.PreferenceManager;
 import android.provider.BaseColumns;
-import android.provider.MediaStore;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
-import android.util.Log;
+//import android.util.Log;
 import android.view.Surface;
 
 import com.google.android.gms.common.api.ResultCallback;
@@ -57,8 +53,6 @@ import com.google.android.gms.location.LocationServices;
 
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
@@ -105,7 +99,7 @@ public class RecordService extends Service {
     private static VideoQuality videoQuality;
     private static Camera camera;
 //    private static TipoverThreshold tipoverThreshold;
-    private static int tipoverTimeout;
+    private static Long tipoverTimeout;
     private CameraDevice cameraDevice;
     private CaptureRequest.Builder captureRequestBuilder;
     private CameraCaptureSession cameraCaptureSession;
@@ -147,7 +141,8 @@ public class RecordService extends Service {
     private long timeAxisDown = 0;
     private long timeTipped = 0;
     private boolean orientationLocked = false;
-    private boolean tippedButLocked = false;
+    private boolean oneTimeTipover = false;
+    private boolean oneTimeUpright = false;
 
     private boolean thumbnailNextKeyframe = false;
 
@@ -793,31 +788,46 @@ public class RecordService extends Service {
                         || (downAxis == DownAxis.Y_POS && event.values[1] < gThreshold)
                         || (downAxis == DownAxis.Y_NEG && event.values[1] > -gThreshold)) { /* tipped */
 
-                    if (! tippedButLocked) { /* one-time tipover callback */
+                    if (! oneTimeTipover) { /* one-time tipover callback */
 
-                        tippedButLocked = true;
+                        oneTimeTipover = true;
                         thumbnailNextKeyframe = true;
 
                         if (onTipoverCallback != null) {
                             onTipoverCallback.onTipover();
                         }
+
+                        timeTipped = event.timestamp;
                     }
+
+                    oneTimeUpright = false;
 
                     if (event.timestamp - timeTipped >= tipoverTimeout) {
 
+                        //Log.d(TAG, "Over tipoverTimeout");
+                        //Log.d(TAG, "Event timestamp: " + String.valueOf(event.timestamp));
+                        //Log.d(TAG, "timeTipped: " + String.valueOf(timeTipped));
+                        //Log.d(TAG, "diff: " + String.valueOf(event.timestamp - timeTipped));
+                        //Log.d(TAG, "tipoverTimeout: " + String.valueOf(tipoverTimeout));
                         if (saveOnTipover) {
                             stopRecording();
                         }
                         orientationLocked = false;
-                        tippedButLocked = false;
+                        oneTimeTipover = false;
                         downAxis = DownAxis.NONE;
                     }
                 } else { /* not tipped */
 
-                    onTipoverCallback.onRight();
+                    if (! oneTimeUpright) { /* one-time uprighting callback */
 
-                    tippedButLocked = false;
-                    timeTipped = event.timestamp;
+                        oneTimeUpright = true;
+
+                        if (onTipoverCallback != null) {
+                            onTipoverCallback.onRight();
+                        }
+                    }
+
+                    oneTimeTipover = false;
                 }
             } else {
 
@@ -910,7 +920,7 @@ public class RecordService extends Service {
                 cameraCaptureSession.abortCaptures();
                 cameraCaptureSession.close();
             } catch (CameraAccessException | IllegalStateException e) {
-                e.printStackTrace();
+                //e.printStackTrace();
                 cameraStopped();
             }
         }
@@ -1213,9 +1223,9 @@ public class RecordService extends Service {
         }
     }
 
-    public static void setTipoverTimeout(int tipoverTimeout) {
-       //Log.d(TAG, "setTipoverTimeout: " + String.valueOf(tipoverTimeout));
+    public static void setTipoverTimeout(Long tipoverTimeout) {
         RecordService.tipoverTimeout = tipoverTimeout * 1_000_000_000;
+        //Log.d(TAG, "setTipoverTimeout: " + String.valueOf(RecordService.tipoverTimeout));
     }
 
     public static void setSaveLocation(boolean saveLocation) {

@@ -107,7 +107,7 @@
     <!-- Strings related to the about screen -->
 
     <string name="about_text">
-        Copyright &#x00A9; 2017 by Joshua Salisbury\n\n<b>No warranty is given for this product, not even an implied warranty of fitness for a particular purpose.</b>
+        Copyright &#x00A9; 2018 by Mnemolyst Bites under the Creative Commons Attribution-ShareAlike https://creativecommons.org/licenses/by-sa/4.0 license.\n\n<b>No warranty is given for this product. No guarantee is given that it will be a positive influence on your life in any sense.</b>\n\nThe author intends for this software to record video and audio potentially for hours in a way that uses relatively little storage. I intend that when it starts recording, it remembers which way is up, and if it detects that it has tipped over it saves the last some seconds in a standard video file format (MP4), optionally backing it up in The C1oud (Google Drive<sup style="font-size:75%">TM</sup>).\n\nThere is no officially suggested nor supported use. The author affixes it to his bicycle and uses it as a kind of dashcam with automatic data backup.\n\nTested solely on a Nexus 5X. Your results may vary.
     </string>
 
     <!-- Snackbar strings -->

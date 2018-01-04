@@ -35,7 +35,7 @@ import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.Toolbar;
 import android.transition.TransitionInflater;
-import android.util.Log;
+//import android.util.Log;
 import android.support.v7.view.ActionMode;
 import android.util.SparseBooleanArray;
 import android.util.TypedValue;
@@ -537,6 +537,7 @@ public class MainActivity extends AppCompatActivity
         @Override
         void onTipover() {
 
+            //Log.d(TAG, "onTipover");
             TextView textView = (TextView) findViewById(R.id.orientationStatus);
             textView.setText(getResources().getString(R.string.recording_popup_tipover));
         }
@@ -544,6 +545,7 @@ public class MainActivity extends AppCompatActivity
         @Override
         void onRight() {
 
+            //Log.d(TAG, "onRight");
             TextView textView = (TextView) findViewById(R.id.orientationStatus);
             textView.setText(getResources().getString(R.string.recording_popup_orientation_locked));
         }
@@ -747,10 +749,11 @@ public class MainActivity extends AppCompatActivity
             neededPermissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
         }*/
 
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-//                && ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.RECORD_AUDIO)) {
+        /*if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
+                && ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.RECORD_AUDIO)) {
+
             neededPermissions.add(Manifest.permission.RECORD_AUDIO);
-        }
+        }*/
 
         if (neededPermissions.isEmpty()) {
             return true;
