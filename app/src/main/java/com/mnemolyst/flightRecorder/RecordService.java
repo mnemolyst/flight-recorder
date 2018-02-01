@@ -42,12 +42,14 @@ import android.support.v4.app.ActivityCompat;
 //import android.util.Log;
 import android.view.Surface;
 
+//import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
 import com.google.android.gms.common.api.ResultCallback;
 import com.google.android.gms.common.api.Status;
 import com.google.android.gms.drive.Drive;
 import com.google.android.gms.drive.DriveApi;
 import com.google.android.gms.drive.DriveContents;
 import com.google.android.gms.drive.DriveFolder;
+//import com.google.android.gms.drive.DriveResourceClient;
 import com.google.android.gms.drive.MetadataChangeSet;
 import com.google.android.gms.location.LocationServices;
 
@@ -1092,7 +1094,7 @@ public class RecordService extends Service {
             e.printStackTrace();
         }*/
 
-        SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
+        //SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
 
         if (backupToDrive && MainActivity.hasDriveApi()) {
 
@@ -1122,7 +1124,7 @@ public class RecordService extends Service {
         @Override
         public void onResult(@NonNull DriveApi.DriveContentsResult driveContentsResult) {
 
-           //Log.d(TAG, "driveContentsCallback.onResult");
+//            Log.d(TAG, "driveContentsCallback.onResult");
 
             DriveContents driveContents = driveContentsResult.getDriveContents();
 
@@ -1144,7 +1146,7 @@ public class RecordService extends Service {
             }
 
             MetadataChangeSet changeSet = new MetadataChangeSet.Builder()
-                    .setTitle("Flight recording " + internalFile.getName())
+                    .setTitle("Flight Recording " + internalFile.getName())
                     .setMimeType("video/mp4").build();
 
             Drive.DriveApi.getRootFolder(MainActivity.googleApiClient).createFile(MainActivity.googleApiClient, changeSet, driveContents);
