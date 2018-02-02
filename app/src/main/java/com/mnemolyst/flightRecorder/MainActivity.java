@@ -749,11 +749,11 @@ public class MainActivity extends AppCompatActivity
             neededPermissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
         }*/
 
-        /*if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
                 && ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.RECORD_AUDIO)) {
 
             neededPermissions.add(Manifest.permission.RECORD_AUDIO);
-        }*/
+        }
 
         if (neededPermissions.isEmpty()) {
             return true;

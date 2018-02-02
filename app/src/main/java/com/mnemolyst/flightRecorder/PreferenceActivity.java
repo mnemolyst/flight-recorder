@@ -32,7 +32,8 @@ import com.google.android.gms.location.LocationServices;
 
 import java.util.List;
 
-public class PreferenceActivity extends AppCompatActivity implements GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener, SharedPreferences.OnSharedPreferenceChangeListener {
+public class PreferenceActivity extends AppCompatActivity
+        implements GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener, SharedPreferences.OnSharedPreferenceChangeListener {
 
     private static final String TAG = "PreferenceActivity";
     static final String KEY_PREF_DURATION = "pref_duration";
